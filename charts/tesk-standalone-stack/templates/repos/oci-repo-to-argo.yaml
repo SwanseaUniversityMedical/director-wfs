@@ -13,12 +13,14 @@
     {{- if $repoURL -}}
       {{- if not (or (hasPrefix "http://" $repoURL) (hasPrefix "https://" $repoURL)) -}}
 
+{{- $slug := $name | lower | replace "_" "-" | replace " " "-" | replace "." "-" | trunc 50 | trimAll "-" -}}
+
 ---
 
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ printf "argocd-helm-oci-%s" $name | trunc 63 | trimSuffix "-" }}
+  name: {{ printf "argocd-helm-oci-%s" $slug | trunc 63 | trimSuffix "-" }}
   namespace: {{ $argoNs | quote }}
   labels:
     {{- include "tesk-standalone-stack.labels" $root | nindent 4 }}
