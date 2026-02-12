@@ -18,3 +18,24 @@ spec:
       condition: MustNotExist
     assign:
       value: true
+---
+apiVersion: mutations.gatekeeper.sh/v1
+kind: Assign
+metadata:
+  name: k8spspreadonlyrootfs-jobs
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  applyTo:
+  - groups: ["batch"]
+    kinds: ["Job"]
+    versions: ["v1"]
+  location: "spec.template.spec.containers[name:*].securityContext.readOnlyRootFilesystem"
+  parameters:
+    pathTests:
+    - subPath: "spec.template.spec.containers[name:*].securityContext.readOnlyRootFilesystem"
+      condition: MustNotExist
+    assign:
+      value: true

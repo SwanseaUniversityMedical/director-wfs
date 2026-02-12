@@ -43,4 +43,56 @@ spec:
     assign:
       value: [""] 
 
+---
+
+apiVersion: mutations.gatekeeper.sh/v1
+kind: ModifySet
+metadata:
+  name: k8spspcapabilities-jobs
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  applyTo:
+    - groups: ["batch"]
+      versions: ["v1"]
+      kinds: ["Job"]
+  match:
+    scope: Namespaced
+    kinds:
+      - apiGroups: ["batch"]
+        kinds: ["Job"]
+  location: "spec.template.spec.containers[name:*].securityContext.capabilities.drop"
+  parameters:
+    operation: merge
+    values:
+      fromList: ["ALL"]
+
+---
+
+apiVersion: mutations.gatekeeper.sh/v1
+kind: ModifySet
+metadata:
+  name: k8spspcapabilities-jobs-init
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  applyTo:
+    - groups: ["batch"]
+      versions: ["v1"]
+      kinds: ["Job"]
+  match:
+    scope: Namespaced
+    kinds:
+      - apiGroups: ["batch"]
+        kinds: ["Job"]
+  location: "spec.template.spec.initContainers[name:*].securityContext.capabilities.drop"
+  parameters:
+    operation: merge
+    values:
+      fromList: ["ALL"]
+
 {{- end }}

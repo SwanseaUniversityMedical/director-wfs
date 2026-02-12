@@ -22,6 +22,27 @@ spec:
 apiVersion: mutations.gatekeeper.sh/v1
 kind: Assign
 metadata:
+  name: k8spsprunasnonroot-jobs
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  applyTo:
+  - groups: ["batch"]
+    kinds: ["Job"]
+    versions: ["v1"]
+  location: "spec.template.spec.containers[name:*].securityContext.runAsNonRoot"
+  parameters:
+    pathTests:
+      - subPath: "spec.template.spec.containers[name:*].securityContext.runAsNonRoot"
+        condition: MustNotExist
+    assign:
+      value: true
+---
+apiVersion: mutations.gatekeeper.sh/v1
+kind: Assign
+metadata:
   name: k8spsprunasnonroot-init
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
@@ -36,6 +57,27 @@ spec:
   parameters:
     pathTests:
       - subPath: "spec.initContainers[name:*].securityContext.runAsNonRoot"
+        condition: MustNotExist
+    assign:
+      value: true
+---
+apiVersion: mutations.gatekeeper.sh/v1
+kind: Assign
+metadata:
+  name: k8spsprunasnonroot-init-jobs
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  applyTo:
+  - groups: ["batch"]
+    kinds: ["Job"]
+    versions: ["v1"]
+  location: "spec.template.spec.initContainers[name:*].securityContext.runAsNonRoot"
+  parameters:
+    pathTests:
+      - subPath: "spec.template.spec.initContainers[name:*].securityContext.runAsNonRoot"
         condition: MustNotExist
     assign:
       value: true
