@@ -1,0 +1,9 @@
+operator:
+  replicas: 1
+
+ipam:
+  mode: kubernetes
+
+hubble:
+  peerService:
+    servicePort: 8443
