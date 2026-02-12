@@ -9,8 +9,9 @@ metadata:
     argocd.argoproj.io/sync-wave: "5"
 spec:
   podSelector:
-    matchLabels:
-      job-name: task-*
+    matchExpressions:
+      - key: job-name
+        operator: Exists
   egress:
     - ports:
         - protocol: TCP

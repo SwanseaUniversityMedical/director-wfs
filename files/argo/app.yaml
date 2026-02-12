@@ -18,11 +18,11 @@ spec:
     - ServerSideApply=true
     - SkipDryRunOnMissingResource=true
     retry:
-      limit: 10
+      limit: 50
       backoff: 
-        duration: "30s"
-        factor: 2
-        maxDuration: "10m0s"
+        duration: "60s"
+        factor: 1
+        maxDuration: "30m0s"
   source:
     repoURL: "harbor.federated-analytics.ac.uk/tesk/chart"
     chart: tesk-standalone-stack
