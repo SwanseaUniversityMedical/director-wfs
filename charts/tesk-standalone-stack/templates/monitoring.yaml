@@ -70,6 +70,9 @@ spec:
               secretName: grafana-cert
             {{- end }}
 
+          initChownData:
+            enabled: false
+
           persistence:
             enabled: true
 
