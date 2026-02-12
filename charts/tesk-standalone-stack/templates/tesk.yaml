@@ -9,7 +9,7 @@ metadata:
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
   annotations:
-    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-wave: "4"
 spec:
   project: {{ .Values.global.argoProject }}
   destination:
@@ -49,6 +49,7 @@ spec:
             - hosts:
               - tesk.{{ .Values.global.ingress.host }}
               secretName: tesk-secret-tls
+        {{- end }}
         {{- end }}
 
         tesk:

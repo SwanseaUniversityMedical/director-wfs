@@ -1,0 +1,64 @@
+{{- if .Values.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: trust-manager-get-root
+  namespace: {{ .Values.certManager.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  # Secret names are always required.
+  secretName: trust-manager-secret
+  duration: 2160h0m0s # 90d
+  renewBefore: 360h0m0s # 15d
+  subject:
+    organizations:
+      - 5s-tes
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+  usages:
+    - server auth
+    - client auth
+    - digital signature
+    - key encipherment
+  dnsNames:
+    - trustmanager
+  ipAddresses:
+    - 127.0.0.1
+  issuerRef:
+    name: ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+---
+
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: overlay-castore
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  sources:
+  # A Secret in the trust namespace created via a cert-manager Certificate
+  - secret:
+      name: "trust-manager-secret"
+      key: "tls.crt"
+  - secret:
+      name: "trust-manager-secret"
+      key: "ca.crt"
+  - useDefaultCAs: true
+  target:
+    configMap:
+      key: "ca-certificates.crt"
+    additionalFormats:
+      jks:
+        key: "cacerts"
+        password: "changeit"
+      pkcs12:
+        key: "pkcs12.p12"
+        password: ""
+
+{{- end }}

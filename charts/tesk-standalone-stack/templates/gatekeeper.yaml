@@ -49,6 +49,7 @@ spec:
             - "{{ .Values.gatekeeper.namespace }}"
             - "{{ .Values.falco.namespace }}"
             - "{{ .Values.prometheus.namespace }}"
+            - "{{ .Values.certManager.namespace }}"
             # ingress controller
             - "ingress-nginx"
             - "argocd"

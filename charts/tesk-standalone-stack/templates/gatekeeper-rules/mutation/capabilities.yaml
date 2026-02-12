@@ -5,6 +5,8 @@ metadata:
   name: k8spspcapabilities
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   applyTo:
     - groups: [""]
@@ -29,6 +31,8 @@ metadata:
   name: k8spspcapabilities
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   applyTo:
   - groups: [""]

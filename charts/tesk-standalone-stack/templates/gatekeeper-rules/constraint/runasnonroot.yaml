@@ -7,6 +7,7 @@ metadata:
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
   annotations:
+    argocd.argoproj.io/sync-wave: "2"
     metadata.gatekeeper.sh/title: "Allowed Users"
     metadata.gatekeeper.sh/version: 1.0.2
     description: >-
@@ -300,6 +301,8 @@ metadata:
   name: psp-pods-allowed-user-ranges
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   match:
     kinds:

@@ -6,6 +6,7 @@ metadata:
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
   annotations:
+    argocd.argoproj.io/sync-wave: "2"
     metadata.gatekeeper.sh/title: "Allow Privilege Escalation in Container"
     metadata.gatekeeper.sh/version: 1.1.0
     description: >-
@@ -149,6 +150,8 @@ metadata:
   name: psp-allow-privilege-escalation-container
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   match:
     kinds:

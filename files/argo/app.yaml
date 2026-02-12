@@ -18,47 +18,38 @@ spec:
     - ServerSideApply=true
     - SkipDryRunOnMissingResource=true
     retry:
-      limit: 5
+      limit: 10
       backoff: 
         duration: "30s"
         factor: 2
         maxDuration: "10m0s"
   source:
-    repoURL: ""
+    repoURL: "harbor.federated-analytics.ac.uk/tesk/chart"
     chart: tesk-standalone-stack
-    targetRevision: "1.0.1"
+    targetRevision: "1.0.0"
     helm:
       valuesObject: 
         global:
-          # this makes the chart autogenerate all secrets
-          dev: true
-          # set this if you're doing local app development
-          # if this isn't set to true you'll need cert-manager installed on your cluster and configured to sign certs
-          localDev: true
+          dev: false
+          localDev: false
           argoProject: tesk-stack
           namespace: tesk-stack
           argoNamespace: argocd
           ingress:
             enabled: true
-            # localtest.me is dns for 127.0.0.1, localhost, if delpoying on a vm change it to a DNS name that
-            # resolves to the name of the vm
             host: "localtest.me"
             className: "nginx"
+            certClusterIssuer: "ca-issuer"
+
+        networkPolicy:
+          # ip not dns name
+          egressMinioIP: ""
+
+        prometheus:
+          grafana:
+            adminPassword: ""
 
 
-        # if using this stack to integrate with 5S-TES, configure this to put output files in the EGRESS minio
-        # you'll need to manually create a secret called "aws-secret" in the same ns as global.namespace
-        #  with the credentials to access that minio. It has a specific format, see the top-level README.
-        # if you don't set this, TESK will default to putting the files in the rustfs 
-        #  it can optionally deploy as part of the stack
-        outputLocationConfig:
-          external: false
-          # has to be ip not dns name, don't include the port
-          ip: ""
-
-        # if outputLocationConfig.external is true then rustfs.enabled needs to be false
-        rustfs:
-          enabled: true
 
 
         

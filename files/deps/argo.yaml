@@ -36,7 +36,6 @@ configs:
     controller.operation.processors: 50
 
   secret:
-    # default password for dev env is "admin"
     argocdServerAdminPassword: "$2a$10$335CAiV08.lMIbC093WhSel3X8wKJlVRpL/EYIHnb8ShUR9YeIj06"
 
 server:

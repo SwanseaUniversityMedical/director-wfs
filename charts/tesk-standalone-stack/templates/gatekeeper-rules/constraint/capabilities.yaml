@@ -11,6 +11,7 @@ metadata:
       `allowedCapabilities` and `requiredDropCapabilities` fields in a
       PodSecurityPolicy. For more information, see
       https://kubernetes.io/docs/concepts/policy/pod-security-policy/#capabilities
+    argocd.argoproj.io/sync-wave: "2"
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
 spec:
@@ -229,6 +230,8 @@ metadata:
   name: capabilities
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   match:
     kinds:

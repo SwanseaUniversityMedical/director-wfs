@@ -4,6 +4,8 @@ metadata:
   name: tesk-security-context-configmap
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
 data:
   securityContext: |
     fsGroup: 1000

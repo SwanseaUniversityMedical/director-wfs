@@ -13,7 +13,6 @@ data:
         }
         ready
         rewrite name exact tesk.localtest.me tesk-api.tesk-stack.svc.cluster.local
-        rewrite name exact rustfs.localtest.me rustfs.tesk-stack.svc.cluster.local
 
         kubernetes cluster.local in-addr.arpa ip6.arpa {
            pods insecure

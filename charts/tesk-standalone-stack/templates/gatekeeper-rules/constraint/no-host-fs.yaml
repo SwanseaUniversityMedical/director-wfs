@@ -6,6 +6,7 @@ metadata:
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
   annotations:
+    argocd.argoproj.io/sync-wave: "2"
     metadata.gatekeeper.sh/title: "Host Filesystem"
     metadata.gatekeeper.sh/version: 1.1.1
     description: >-
@@ -191,6 +192,8 @@ metadata:
   name: no-host-paths
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   match:
     kinds:

@@ -4,6 +4,8 @@ metadata:
   name: k8spsprunasnonroot
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   applyTo:
   - groups: [""]
@@ -23,6 +25,8 @@ metadata:
   name: k8spsprunasnonroot-init
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   applyTo:
   - groups: [""]
