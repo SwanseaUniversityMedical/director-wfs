@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
   annotations:
-    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-wave: "7"
 spec:
   applyTo:
   - groups: [""]
@@ -26,7 +26,7 @@ metadata:
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
   annotations:
-    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-wave: "7"
 spec:
   applyTo:
   - groups: [""]
