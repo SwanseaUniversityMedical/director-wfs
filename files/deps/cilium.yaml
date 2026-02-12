@@ -17,7 +17,7 @@ hubble:
     servicePort: 8443
 
 
-kubeProxyReplacement: strict
+kubeProxyReplacement: true
 k8sServiceHost: director-wfs-control-plane 
 k8sServicePort: 6443 
 
