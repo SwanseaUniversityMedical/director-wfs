@@ -4,7 +4,5 @@
 # ignore the local test clone repo
 dwfs-test/**
 
-# ignore the shell script until it's done
-director-wfs.sh
 dwfs-test/
 ./dwfs-test
