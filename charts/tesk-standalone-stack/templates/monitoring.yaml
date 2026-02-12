@@ -48,7 +48,7 @@ spec:
             - grafana.{{ .Values.global.ingress.host }}
             paths:
             - /
-            {{- if not .Values.global.dev .Values.global.localDev }}
+            {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
             annotations:
               cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
             tls:
@@ -76,7 +76,7 @@ spec:
                   accessModes: ["ReadWriteOnce"]
                   resources:
                     requests:
-                      storage: {{ .Values.global.prometheus.storageSize }}
+                      storage: {{ .Values.prometheus.storageSize }}
 
             
           ingress:
@@ -86,7 +86,7 @@ spec:
             - prometheus.{{ .Values.global.ingress.host }}
             paths:
             - /
-            {{- if not .Values.global.dev .Values.global.localDev }}
+            {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
             annotations:
               cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
             tls:

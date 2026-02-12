@@ -42,7 +42,7 @@ spec:
           enabled: true
           className: {{ .Values.global.ingress.className }}
           host: "tesk.{{ .Values.global.ingress.host }}"
-          {{- if not .Values.global.dev .Values.global.localDev }}
+          {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
           annotations:
             cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
           tls:
