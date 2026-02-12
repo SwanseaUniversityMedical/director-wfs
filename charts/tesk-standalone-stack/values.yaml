@@ -19,8 +19,8 @@ global:
     # this assumes you have cert-manager installed and have configured a cluster issuer.
     certClusterIssuer: "ca-issuer"
   storage:
-    defaultClass: "default"
-    rwxClass: "default"
+    defaultClass: "standard"
+    rwxClass: "standard"
 
 
 
