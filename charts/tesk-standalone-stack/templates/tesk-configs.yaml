@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tesk-security-context-configmap
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+data:
+  securityContext: |
+    fsGroup: 1000
+

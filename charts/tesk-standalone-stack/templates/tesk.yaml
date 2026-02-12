@@ -1,0 +1,64 @@
+{{- if .Values.tesk.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tesk
+  namespace: {{ .Values.global.namespace }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: {{ .Values.global.argoProject }}
+  destination:
+    namespace: {{ .Values.global.namespace }}
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+  source:
+    repoURL: {{ .Values.tesk.repoURL }}
+    chart: {{ .Values.tesk.chart }}
+    targetRevision: {{ .Values.tesk.chartVersion }}
+    helm:
+      valuesObject:
+        storage: 
+          type: s3
+          authType: extraManifests
+
+        {{- with .Values.tesk.service }}
+        service:
+          {{- . | toYaml | nindent 10 }}
+        {{- end }}
+
+        {{- if .Values.global.ingress.enabled }}
+        ingress:
+          enabled: true
+          className: {{ .Values.global.ingress.className }}
+          host: "tesk.{{ .Values.global.ingress.host }}"
+          {{- if not .Values.global.dev .Values.global.localDev }}
+          annotations:
+            cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
+          tls:
+            - hosts:
+              - tesk.{{ .Values.global.ingress.host }}
+              secretName: tesk-secret-tls
+        {{- end }}
+
+        tesk:
+          image: "{{ .Values.tesk.image }}"
+          taskmaster_image_version: master
+          taskmaster_filer_image_version: user-file-issues
+          extraEnv:
+            - name: "TESK_API_TASKMASTER_ENVIRONMENT_CONFIGMAP"
+              value: "tesk-security-context-configmap"
+            - name: "CONFIGMAP"
+              value: "tesk-security-context-configmap"
+
+{{- end }}

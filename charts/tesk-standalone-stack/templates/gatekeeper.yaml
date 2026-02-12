@@ -1,0 +1,59 @@
+{{- if .Values.gatekeeper.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opa-gatekeeper
+  namespace: {{ .Values.global.namespace }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+spec:
+  project: {{ .Values.global.argoProject }}
+  destination:
+    namespace: {{ .Values.gatekeeper.namespace }}
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+  source:
+    repoURL: {{ .Values.gatekeeper.repoURL }}
+    chart: {{ .Values.gatekeeper.chart }}
+    targetRevision: {{ .Values.gatekeeper.chartVersion }}
+    helm:
+      valuesObject:
+        auditMatchKindOnly: true
+
+        auditInterval: 240
+
+        validatingWebhookExemptNamespacesLabels:
+          "admission.gatekeeper.sh/ignore":
+            - "pleaseignore"
+
+        mutatingWebhookExemptNamespacesLabels:
+          "admission.gatekeeper.sh/ignore":
+            - "pleaseignore"
+
+        controllerManager:
+          exemptNamespaces:
+            - "kube-system"
+            - "kube-node-lease"
+            - "kube-public"
+            - "{{ .Values.gatekeeper.namespace }}"
+            - "{{ .Values.falco.namespace }}"
+            - "{{ .Values.prometheus.namespace }}"
+            # ingress controller
+            - "ingress-nginx"
+            - "argocd"
+            {{- with .Values.gatekeeper.extraExempt.namespaces }}
+            - "{{ . }}"
+            {{- end }}
+            
+{{- end }}

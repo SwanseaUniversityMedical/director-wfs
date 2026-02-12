@@ -1,0 +1,42 @@
+{{- if .Values.gatekeeper.enabled }}
+apiVersion: mutations.gatekeeper.sh/v1
+kind: ModifySet
+metadata:
+  name: k8spspcapabilities
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+spec:
+  applyTo:
+    - groups: [""]
+      versions: ["v1"]
+      kinds: ["Pod"]
+  match:
+    scope: Namespaced
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  location: "spec.containers[name:*].securityContext.capabilities.drop"
+  parameters:
+    operation: replace
+    values:
+      fromList: ["ALL"]
+
+---
+
+apiVersion: mutations.gatekeeper.sh/v1
+kind: Assign
+metadata:
+  name: k8spspcapabilities
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+spec:
+  applyTo:
+  - groups: [""]
+    kinds: ["Pod"]
+    versions: ["v1"]
+  location: "spec.containers[name:*].securityContext.capabilities.add"
+  parameters:
+    assign:
+      value: [""] 
+
+{{- end }}

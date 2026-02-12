@@ -1,0 +1,62 @@
+{{- if .Values.falco.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: falco
+  namespace: {{ .Values.global.namespace }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+spec:
+  project: {{ .Values.global.argoProject }}
+  destination:
+    namespace: {{ .Values.falco.namespace }}
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    managedNamespaceMetadata:
+      labels:
+        # falco needs to run in a priv ns
+        pod-security.kubernetes.io/enforce: privileged
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+  source:
+    repoURL: {{ .Values.falco.repoURL }}
+    chart: {{ .Values.falco.chart }}
+    targetRevision: {{ .Values.falco.chartVersion }}
+    helm:
+      valuesObject:
+        falco:
+          webserver:
+            prometheus_metrics_enabled: true
+
+        serviceMonitor:
+          create: true
+
+        falcosidekick:
+          enabled: true
+
+          serviceMonitor:
+            enabled: true
+          prometheusRules:
+            enabled: true
+
+          grafana:
+            dashboards:
+              enabled: true
+              configMaps:
+                falcosidekick:
+                  name: falcosidekick-grafana-dashboard
+                  namespace: "{{ .Values.prometheus.namespace }}"
+                  folder: ""
+                  folderAnnotation: grafana_dashboard_folder
+        
+
+{{- end }}

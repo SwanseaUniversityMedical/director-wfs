@@ -1,0 +1,93 @@
+fullnameOverride: "tesk-stack"
+
+global:
+  # this makes the chart autogenerate all secrets
+  dev: true
+  # set this if you're doing local app development
+  # if this isn't set to true you'll need cert-manager installed on your cluster and configured to sign certs
+  localDev: true
+  argoProject: tesk-stack
+  namespace: tesk-stack
+  argoNamespace: argocd
+  ingress:
+    enabled: true
+    # this is dns for 127.0.0.1, localhost, if delpoying on a vm change it to a DNS name that
+    # resolves to the name of the vm
+    host: "localtest.me"
+    className: "nginx"
+    # this assumes you have cert-manager installed and have configured a cluster issuer.
+    certClusterIssuer: "ca-issuer"
+  storage:
+    defaultClass: "default"
+    rwxClass: "default"
+    
+# if using this stack to integrate with 5S-TES, configure this to put output files in the EGRESS minio
+# you'll need to manually create a secret called "aws-secret" in the same ns as global.namespace
+#  with the credentials to access that minio. It has a specific format, see the top-level README.
+# if you don't set this, TESK will default to putting the files in the rustfs 
+#  it can optionally deploy as part of the stack
+outputLocationConfig:
+  external: false
+  # has to be ip not dns name, don't include the port
+  ip: ""
+
+
+tesk:
+  enabled: true
+  repoURL: "harbor.ukserp.ac.uk/tesk/chart"
+  chart: tesk
+  chartVersion: "0.1.0"
+  image: "harbor.ukserp.ac.uk/tesk/tesk-api:1.0.0"
+
+  service:
+    type: ClusterIP
+
+
+networkPolicy:
+  enabled: true
+  extraPolicy: []
+
+
+rustfs:
+  enabled: false
+  namespace: rustfs
+  repoURL: 'https://rustfs.github.io/helm/'
+  chart: rustfs
+  chartVersion: "0.0.82"
+
+  storageSize: "10Gi"
+
+
+falco:
+  enabled: true
+  namespace: falco
+  repoURL: 'https://falcosecurity.github.io/charts'
+  chart: falco
+  chartVersion: "8.0.0"
+
+
+prometheus:
+  enabled: true
+  namespace: "monitoring"
+  repoURL: "ghcr.io/prometheus-community/charts"
+  chart: "kube-prometheus-stack"
+  chartVersion: "81.6.1"
+
+  storageSize: "10Gi"
+
+  grafana:
+    adminSecretName: "grafana-admin"
+
+
+gatekeeper:
+  enabled: true
+  namespace: "gatekeeper-system"
+  repoURL: "https://open-policy-agent.github.io/gatekeeper/charts"
+  chart: "gatekeeper"
+  chartVersion: "3.21.1"
+  extraExempt:
+    namespaces: []
+    namespacePrefixes: []
+
+
+

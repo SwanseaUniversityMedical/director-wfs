@@ -1,0 +1,99 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: {{ .Values.global.namespace }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+spec:
+  project: {{ .Values.global.argoProject }}
+  destination:
+    namespace: {{ .Values.prometheus.namespace }}
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+  source:
+    repoURL: {{ .Values.prometheus.repoURL }}
+    chart: {{ .Values.prometheus.chart }}
+    targetRevision: {{ .Values.prometheus.chartVersion }}
+    helm:
+      valuesObject:
+        crds:
+          upgradeJob:
+            enabled: true
+            forceConflicts: true
+
+        grafana:
+          assertNoLeakedSecrets: false
+          defaultDashboardsTimezone: Europe/Luxembourg
+          admin:
+            existingSecret: "{{ .Values.prometheus.grafana.adminSecretName }}"
+
+          ingress:
+            enabled: {{ .Values.global.ingress.enabled }}
+            ingressClassName: {{ .Values.global.ingress.className }}
+
+            hosts:
+            - grafana.{{ .Values.global.ingress.host }}
+            paths:
+            - /
+            {{- if not .Values.global.dev .Values.global.localDev }}
+            annotations:
+              cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
+            tls:
+            - hosts:
+              - grafana.{{ .Values.global.ingress.host }}
+              secretName: grafana-cert
+            {{- end }}
+
+          persistence:
+            enabled: true
+
+          useStatefulSet: true
+
+        prometheus:
+          prometheusSpec:
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            scrapeConfigSelectorNilUsesHelmValues: false
+
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: {{ .Values.global.storage.defaultClass }}
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: {{ .Values.global.prometheus.storageSize }}
+
+            
+          ingress:
+            enabled: {{ .Values.global.ingress.enabled }}
+            ingressClassName: {{ .Values.global.ingress.className }}
+            hosts:
+            - prometheus.{{ .Values.global.ingress.host }}
+            paths:
+            - /
+            {{- if not .Values.global.dev .Values.global.localDev }}
+            annotations:
+              cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
+            tls:
+            - hosts:
+              - prometheus.{{ .Values.global.ingress.host }}
+              secretName: prometheus-cert
+            {{- end }}
+                              
+
+{{- end }}

@@ -1,0 +1,18 @@
+apiVersion: mutations.gatekeeper.sh/v1
+kind: Assign
+metadata:
+  name: k8spspreadonlyrootfs
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+spec:
+  applyTo:
+  - groups: [""]
+    kinds: ["Pod"]
+    versions: ["v1"]
+  location: "spec.containers[name:*].securityContext.readOnlyRootFilesystem"
+  parameters:
+    pathTests:
+    - subPath: "spec.containers[name:*].securityContext.readOnlyRootFilesystem"
+      condition: MustNotExist
+    assign:
+      value: true

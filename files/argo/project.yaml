@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: tesk-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    argocd.argoproj.io/rootproject: "true"
+spec:
+  # Project description
+  description: TESK stack helm chart for greenfield deployments
+
+  # Allow manifests to deploy from only this Git repo or the app repo
+  sourceRepos:
+  - '*'
+
+  sourceNamespaces:
+  - '*'
+
+  destinations:
+  - namespace: '*'
+    server: https://kubernetes.default.svc
+  
+  clusterResourceWhitelist:
+  - group: '*'
+    kind: '*'
