@@ -90,13 +90,18 @@ spec:
                   has(container.securityContext) &&
                   has(container.securityContext.capabilities) &&
                   has(container.securityContext.capabilities.add) &&
-                  container.securityContext.capabilities.add.exists(capability, !(capability in variables.allowedCapabilities))
+                  size(
+                    container.securityContext.capabilities.add
+                      .filter(c, string(c).trim() != "" && !(c in variables.allowedCapabilities))
+                  ) > 0
                 )
                 .map(container,
                   [container.name,
-                   dyn(container.securityContext.capabilities.add
-                     .filter(capability, !(capability in variables.allowedCapabilities))
-                     .join(", "))
+                   dyn(
+                     container.securityContext.capabilities.add
+                       .filter(c, string(c).trim() != "" && !(c in variables.allowedCapabilities))
+                       .join(", ")
+                   )
                   ]
                 )
           - name: requiredDropCapabilities

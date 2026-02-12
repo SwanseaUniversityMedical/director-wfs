@@ -26,26 +26,6 @@ spec:
 ---
 
 apiVersion: mutations.gatekeeper.sh/v1
-kind: Assign
-metadata:
-  name: k8spspcapabilities
-  labels:
-    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
-  annotations:
-    argocd.argoproj.io/sync-wave: "7"
-spec:
-  applyTo:
-  - groups: [""]
-    kinds: ["Pod"]
-    versions: ["v1"]
-  location: "spec.containers[name:*].securityContext.capabilities.add"
-  parameters:
-    assign:
-      value: [""] 
-
----
-
-apiVersion: mutations.gatekeeper.sh/v1
 kind: ModifySet
 metadata:
   name: k8spspcapabilities-jobs
