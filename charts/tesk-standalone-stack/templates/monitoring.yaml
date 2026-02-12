@@ -51,7 +51,7 @@ spec:
           assertNoLeakedSecrets: false
           defaultDashboardsTimezone: Europe/Luxembourg
           admin:
-            existingSecret: "{{ .Values.prometheus.grafana.adminSecretName }}"
+            existingSecret: "grafana-admin"
 
           ingress:
             enabled: {{ .Values.global.ingress.enabled }}
