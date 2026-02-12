@@ -5,6 +5,8 @@ metadata:
   name: k8spspdefaultallowprivilegeescalation
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
 spec:
   applyTo:
   - groups: [""]
@@ -21,9 +23,32 @@ spec:
 apiVersion: mutations.gatekeeper.sh/v1alpha1
 kind: Assign
 metadata:
+  name: k8spspdefaultallowprivilegeescalation-jobs
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  applyTo:
+  - groups: ["batch"]
+    kinds: ["Job"]
+    versions: ["v1"]
+  location: "spec.template.spec.containers[name:*].securityContext.allowPrivilegeEscalation"
+  parameters:
+    pathTests:
+    - subPath: "spec.template.spec.containers[name:*].securityContext.allowPrivilegeEscalation"
+      condition: MustNotExist
+    assign:
+      value: false
+---
+apiVersion: mutations.gatekeeper.sh/v1alpha1
+kind: Assign
+metadata:
   name: k8spspdefaultallowprivilegeescalation-init
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
 spec:
   applyTo:
   - groups: [""]
@@ -40,9 +65,32 @@ spec:
 apiVersion: mutations.gatekeeper.sh/v1alpha1
 kind: Assign
 metadata:
+  name: k8spspdefaultallowprivilegeescalation-init-jobs
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  applyTo:
+  - groups: ["batch"]
+    kinds: ["Job"]
+    versions: ["v1"]
+  location: "spec.template.spec.initContainers[name:*].securityContext.allowPrivilegeEscalation"
+  parameters:
+    pathTests:
+    - subPath: "spec.template.spec.initContainers[name:*].securityContext.allowPrivilegeEscalation"
+      condition: MustNotExist
+    assign:
+      value: false
+---
+apiVersion: mutations.gatekeeper.sh/v1alpha1
+kind: Assign
+metadata:
   name: k8spspdefaultallowprivilegeescalation-ephemeral
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
 spec:
   applyTo:
   - groups: [""]
@@ -55,5 +103,4 @@ spec:
       condition: MustNotExist
     assign:
       value: false
-
 {{- end }}

@@ -7,7 +7,8 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
   annotations:
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/compare-options: "ServerSideDiff=true"
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
 spec:
@@ -33,12 +34,20 @@ spec:
           upgradeJob:
             enabled: true
             forceConflicts: true
+            image:
+              kubectl:
+                tag: "{{ .Values.global.kubeVersion }}"
+
+        prometheusOperator:
+          admissionWebhooks:
+            annotations:
+              argocd.argoproj.io/hook: PreSync
 
         grafana:
           assertNoLeakedSecrets: false
           defaultDashboardsTimezone: Europe/Luxembourg
           admin:
-            existingSecret: "{{ .Values.prometheus.grafana.adminSecretName }}"
+            existingSecret: "grafana-admin"
 
           ingress:
             enabled: {{ .Values.global.ingress.enabled }}
@@ -48,7 +57,7 @@ spec:
             - grafana.{{ .Values.global.ingress.host }}
             paths:
             - /
-            {{- if not .Values.global.dev .Values.global.localDev }}
+            {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
             annotations:
               cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
             tls:
@@ -56,6 +65,9 @@ spec:
               - grafana.{{ .Values.global.ingress.host }}
               secretName: grafana-cert
             {{- end }}
+
+          initChownData:
+            enabled: false
 
           persistence:
             enabled: true
@@ -76,7 +88,7 @@ spec:
                   accessModes: ["ReadWriteOnce"]
                   resources:
                     requests:
-                      storage: {{ .Values.global.prometheus.storageSize }}
+                      storage: {{ .Values.prometheus.storageSize }}
 
             
           ingress:
@@ -86,7 +98,7 @@ spec:
             - prometheus.{{ .Values.global.ingress.host }}
             paths:
             - /
-            {{- if not .Values.global.dev .Values.global.localDev }}
+            {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
             annotations:
               cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
             tls:

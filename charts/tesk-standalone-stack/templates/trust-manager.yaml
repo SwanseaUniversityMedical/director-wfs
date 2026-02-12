@@ -1,0 +1,36 @@
+{{- if .Values.trustManager.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trust-manager
+  namespace: {{ .Values.global.namespace }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+spec:
+  project: {{ .Values.global.argoProject }}
+  destination:
+    namespace: {{ .Values.certManager.namespace }}
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+  source:
+    repoURL: {{ .Values.trustManager.repoURL }}
+    chart: {{ .Values.trustManager.chart }}
+    targetRevision: {{ .Values.trustManager.chartVersion }}
+    helm:
+      valuesObject:
+        app:
+          trust:
+            namespace: {{ .Values.certManager.namespace }}
+
+{{- end }}

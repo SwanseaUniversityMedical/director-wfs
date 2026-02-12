@@ -1,0 +1,78 @@
+{{- if .Values.gatekeeper.enabled }}
+
+apiVersion: mutations.gatekeeper.sh/v1
+kind: Assign
+metadata:
+  name: k8spsprunasuser
+spec:
+  applyTo:
+  - groups: [""]
+    kinds: ["Pod"]
+    versions: ["v1"]
+  location: "spec.containers[name:*].securityContext.runAsUser"
+  parameters:
+    pathTests:
+      - subPath: "spec.containers[name:*].securityContext.runAsUser"
+        condition: MustNotExist
+    assign:
+      value: 1000
+ 
+---
+
+apiVersion: mutations.gatekeeper.sh/v1
+kind: Assign
+metadata:
+  name: k8spsprunasuser-jobs
+spec:
+  applyTo:
+  - groups: ["batch"]
+    kinds: ["Job"]
+    versions: ["v1"]
+  location: "spec.template.spec.containers[name:*].securityContext.runAsUser"
+  parameters:
+    pathTests:
+      - subPath: "spec.template.spec.containers[name:*].securityContext.runAsUser"
+        condition: MustNotExist
+    assign:
+      value: 1000
+
+---
+
+apiVersion: mutations.gatekeeper.sh/v1
+kind: Assign
+metadata:
+  name: k8spsprunasuser-init
+spec:
+  applyTo:
+  - groups: [""]
+    kinds: ["Pod"]
+    versions: ["v1"]
+  location: "spec.initContainers[name:*].securityContext.runAsUser"
+  parameters:
+    pathTests:
+      - subPath: "spec.initContainers[name:*].securityContext.runAsUser"
+        condition: MustNotExist
+    assign:
+      value: 1000
+
+---
+
+apiVersion: mutations.gatekeeper.sh/v1
+kind: Assign
+metadata:
+  name: k8spsprunasuser-init-jobs
+spec:
+  applyTo:
+  - groups: ["batch"]
+    kinds: ["Job"]
+    versions: ["v1"]
+  location: "spec.template.spec.initContainers[name:*].securityContext.runAsUser"
+  parameters:
+    pathTests:
+      - subPath: "spec.template.spec.initContainers[name:*].securityContext.runAsUser"
+        condition: MustNotExist
+    assign:
+      value: 1000
+
+
+{{- end }}

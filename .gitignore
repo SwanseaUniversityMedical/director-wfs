@@ -1,0 +1,11 @@
+.DS_Store
+**/.DS_Store
+
+# ignore the local test clone repo
+dwfs-test/**
+
+dwfs-test/
+./dwfs-test
+
+# ignore the local repo clone
+director-wfs/**

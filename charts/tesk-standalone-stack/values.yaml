@@ -2,10 +2,11 @@ fullnameOverride: "tesk-stack"
 
 global:
   # this makes the chart autogenerate all secrets
-  dev: true
+  dev: false
   # set this if you're doing local app development
   # if this isn't set to true you'll need cert-manager installed on your cluster and configured to sign certs
-  localDev: true
+  localDev: false
+  kubeVersion: ""
   argoProject: tesk-stack
   namespace: tesk-stack
   argoNamespace: argocd
@@ -18,18 +19,9 @@ global:
     # this assumes you have cert-manager installed and have configured a cluster issuer.
     certClusterIssuer: "ca-issuer"
   storage:
-    defaultClass: "default"
-    rwxClass: "default"
-    
-# if using this stack to integrate with 5S-TES, configure this to put output files in the EGRESS minio
-# you'll need to manually create a secret called "aws-secret" in the same ns as global.namespace
-#  with the credentials to access that minio. It has a specific format, see the top-level README.
-# if you don't set this, TESK will default to putting the files in the rustfs 
-#  it can optionally deploy as part of the stack
-outputLocationConfig:
-  external: false
-  # has to be ip not dns name, don't include the port
-  ip: ""
+    defaultClass: "standard"
+    rwxClass: "standard"
+
 
 
 tesk:
@@ -45,17 +37,9 @@ tesk:
 
 networkPolicy:
   enabled: true
+  # ip not dns name
+  egressMinioIP: ""
   extraPolicy: []
-
-
-rustfs:
-  enabled: false
-  namespace: rustfs
-  repoURL: 'https://rustfs.github.io/helm/'
-  chart: rustfs
-  chartVersion: "0.0.82"
-
-  storageSize: "10Gi"
 
 
 falco:
@@ -71,13 +55,11 @@ prometheus:
   namespace: "monitoring"
   repoURL: "ghcr.io/prometheus-community/charts"
   chart: "kube-prometheus-stack"
-  chartVersion: "81.6.1"
+  chartVersion: "81.6.3"
 
   storageSize: "10Gi"
-
   grafana:
-    adminSecretName: "grafana-admin"
-
+    adminPassword: ""
 
 gatekeeper:
   enabled: true
@@ -89,5 +71,19 @@ gatekeeper:
     namespaces: []
     namespacePrefixes: []
 
+certManager:
+  enabled: true
+  namespace: "cert-manager"
+  repoURL: "quay.io/jetstack/charts"
+  chart: "cert-manager"
+  chartVersion: "v1.19.2"
+
+
+trustManager:
+  enabled: true
+  # no namespace option, always installs into cert-manager namespace
+  repoURL: "quay.io/jetstack/charts"
+  chart: "trust-manager"
+  chartVersion: "v0.20.3"
 
 

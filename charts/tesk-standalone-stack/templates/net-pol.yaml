@@ -5,10 +5,13 @@ metadata:
   name: tesk
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   podSelector:
-    matchLabels:
-      job-name: task-*
+    matchExpressions:
+      - key: job-name
+        operator: Exists
   egress:
     - ports:
         - protocol: TCP
@@ -22,18 +25,9 @@ spec:
           port: 1
           endPort: 32768
       to:
-        {{- if .Values.outputLocationConfig.external }}
         # this is the ip of the egress minio
         - ipBlock:
-            cidr: {{ .Values.outputLocationConfig.ip }}/32
-        {{- else }}
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.rustfs.namespace }}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: rustfs
-        {{- end }}
+            cidr: {{ .Values.networkPolicy.egressMinioIP }}/32
     # cluster DNS or something?
     - ports:
         - protocol: UDP

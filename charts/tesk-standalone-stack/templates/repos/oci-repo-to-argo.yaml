@@ -4,30 +4,34 @@
 
 # Expected values:
 #   global.argoNamespace (defaults to "argocd" if not set)
-{{- $argoNs := default "argocd" .Values.global.argoNamespace -}}
+{{- $root := . -}}
+{{- $argoNs := default "argocd" $root.Values.global.argoNamespace -}}
 
-{{- range $name, $cfg := .Values -}}
-  {{- /* only consider maps */ -}}
+{{- range $name, $cfg := $root.Values -}}
   {{- if kindIs "map" $cfg -}}
     {{- $repoURL := get $cfg "repoURL" -}}
     {{- if $repoURL -}}
-      {{- /* skip if repoURL starts with http:// or https:// */ -}}
       {{- if not (or (hasPrefix "http://" $repoURL) (hasPrefix "https://" $repoURL)) -}}
+
+{{- $slug := $name | lower | replace "_" "-" | replace " " "-" | replace "." "-" | trunc 50 | trimAll "-" -}}
+
 ---
+
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ printf "argocd-helm-oci-%s" $name | trunc 63 | trimSuffix "-" }}
+  name: {{ printf "argocd-helm-oci-%s" $slug | trunc 63 | trimSuffix "-" }}
   namespace: {{ $argoNs | quote }}
   labels:
+    {{- include "tesk-standalone-stack.labels" $root | nindent 4 }}
     argocd.argoproj.io/secret-type: repository
-    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
 stringData:
   enableOCI: "true"
   name: {{ $name | quote }}
   type: helm
   url: {{ $repoURL | quote }}
 
+---
       {{- end -}}
     {{- end -}}
   {{- end -}}

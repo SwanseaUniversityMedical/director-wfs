@@ -9,7 +9,7 @@ metadata:
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
   annotations:
-    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-wave: "4"
 spec:
   project: {{ .Values.global.argoProject }}
   destination:
@@ -42,13 +42,14 @@ spec:
           enabled: true
           className: {{ .Values.global.ingress.className }}
           host: "tesk.{{ .Values.global.ingress.host }}"
-          {{- if not .Values.global.dev .Values.global.localDev }}
+          {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
           annotations:
             cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
           tls:
             - hosts:
               - tesk.{{ .Values.global.ingress.host }}
               secretName: tesk-secret-tls
+        {{- end }}
         {{- end }}
 
         tesk:
