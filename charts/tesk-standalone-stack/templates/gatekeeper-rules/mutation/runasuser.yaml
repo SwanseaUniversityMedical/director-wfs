@@ -1,4 +1,5 @@
 {{- if .Values.gatekeeper.enabled }}
+
 apiVersion: mutations.gatekeeper.sh/v1
 kind: Assign
 metadata:
@@ -67,10 +68,11 @@ spec:
     versions: ["v1"]
   location: "spec.template.spec.initContainers[name:*].securityContext.runAsUser"
   parameters:
+    pathTests:
       - subPath: "spec.template.spec.initContainers[name:*].securityContext.runAsUser"
         condition: MustNotExist
     assign:
       value: 1000
-      
+
 
 {{- end }}

@@ -1,3 +1,5 @@
+{{- if .Values.gatekeeper.enabled }}
+
 apiVersion: mutations.gatekeeper.sh/v1
 kind: Assign
 metadata:
@@ -18,7 +20,9 @@ spec:
       condition: MustNotExist
     assign:
       value: true
+
 ---
+
 apiVersion: mutations.gatekeeper.sh/v1
 kind: Assign
 metadata:
@@ -39,3 +43,5 @@ spec:
       condition: MustNotExist
     assign:
       value: true
+
+{{- end }}
