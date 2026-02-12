@@ -38,6 +38,15 @@ spec:
               kubectl:
                 tag: "{{ .Values.global.kubeVersion }}"
 
+        prometheusOperator:
+          admissionWebhooks:
+            annotations:
+              argocd.argoproj.io/hook: PreSync
+            patch:
+              annotations:
+                argocd.argoproj.io/hook: PreSync
+                argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+
         grafana:
           assertNoLeakedSecrets: false
           defaultDashboardsTimezone: Europe/Luxembourg
