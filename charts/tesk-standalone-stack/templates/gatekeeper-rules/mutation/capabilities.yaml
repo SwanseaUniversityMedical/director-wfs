@@ -19,7 +19,7 @@ spec:
         kinds: ["Pod"]
   location: "spec.containers[name:*].securityContext.capabilities.drop"
   parameters:
-    operation: replace
+    operation: merge
     values:
       fromList: ["ALL"]
 
