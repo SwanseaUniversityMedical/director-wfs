@@ -42,10 +42,6 @@ spec:
           admissionWebhooks:
             annotations:
               argocd.argoproj.io/hook: PreSync
-            patch:
-              annotations:
-                argocd.argoproj.io/hook: PreSync
-                argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 
         grafana:
           assertNoLeakedSecrets: false
