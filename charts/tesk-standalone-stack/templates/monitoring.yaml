@@ -8,6 +8,7 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
   annotations:
     argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/compare-options: "ServerSideDiff=true"
   labels:
     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
 spec:
