@@ -6,3 +6,6 @@ dwfs-test/**
 
 dwfs-test/
 ./dwfs-test
+
+# ignore the local repo clone
+director-wfs/**
