@@ -26,12 +26,13 @@ spec:
   source:
     repoURL: "harbor.federated-analytics.ac.uk/tesk/chart"
     chart: tesk-standalone-stack
-    targetRevision: "1.0.0"
+    targetRevision: "0.0.0-pr.1"
     helm:
       valuesObject: 
         global:
           dev: false
           localDev: false
+          kubeVersion: ""
           argoProject: tesk-stack
           namespace: tesk-stack
           argoNamespace: argocd

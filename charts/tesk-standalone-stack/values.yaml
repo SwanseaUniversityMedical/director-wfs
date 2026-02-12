@@ -6,6 +6,7 @@ global:
   # set this if you're doing local app development
   # if this isn't set to true you'll need cert-manager installed on your cluster and configured to sign certs
   localDev: false
+  kubeVersion: ""
   argoProject: tesk-stack
   namespace: tesk-stack
   argoNamespace: argocd
@@ -20,6 +21,7 @@ global:
   storage:
     defaultClass: "default"
     rwxClass: "default"
+
 
 
 tesk:
@@ -53,7 +55,7 @@ prometheus:
   namespace: "monitoring"
   repoURL: "ghcr.io/prometheus-community/charts"
   chart: "kube-prometheus-stack"
-  chartVersion: "81.6.1"
+  chartVersion: "81.6.3"
 
   storageSize: "10Gi"
   grafana:
