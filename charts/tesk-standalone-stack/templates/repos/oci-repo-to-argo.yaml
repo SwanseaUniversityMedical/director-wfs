@@ -13,6 +13,7 @@
     {{- if $repoURL -}}
       {{- if not (or (hasPrefix "http://" $repoURL) (hasPrefix "https://" $repoURL)) -}}
 
+---
 
 apiVersion: v1
 kind: Secret
@@ -20,7 +21,7 @@ metadata:
   name: {{ printf "argocd-helm-oci-%s" $name | trunc 63 | trimSuffix "-" }}
   namespace: {{ $argoNs | quote }}
   labels:
-    {{ include "tesk-standalone-stack.labels" $root | nindent 4 }}
+    {{- include "tesk-standalone-stack.labels" $root | nindent 4 }}
     argocd.argoproj.io/secret-type: repository
 stringData:
   enableOCI: "true"
