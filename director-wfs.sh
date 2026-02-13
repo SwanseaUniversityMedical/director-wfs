@@ -448,6 +448,9 @@ log "  GRAFANA_PASSWORD: ${GRAFANA_PASSWORD:0:4}****"
 export DOCKER_DEFAULT_PLATFORM=
 set DOCKER_DEFAULT_PLATFORM=
 
+# if we don't set this we get open file exhaustion
+sudo sysctl -w fs.inotify.max_user_watches=10485760
+
 
 # -----------------------------
 # Prereq versions (override via env if needed)
