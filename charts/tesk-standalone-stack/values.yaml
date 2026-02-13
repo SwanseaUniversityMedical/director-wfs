@@ -67,13 +67,23 @@ prometheus:
   grafana:
     adminPassword: ""
 
-# we use loki for logs
+
+# we use loki for log store
 loki:
   enabled: true
   # no namespace as it goes into the prometheus ns
   repoURL: "https://grafana.github.io/helm-charts"
   chart: loki
   chartVersion: "6.53.0"
+
+
+# alloy for log collection
+alloy:
+  enabled: true
+  # no namespace as it goes into the prometheus ns
+  repoURL: "https://grafana.github.io/helm-charts"
+  chart: alloy
+  chartVersion: "1.6.0"
 
 
 gatekeeper:
@@ -85,6 +95,7 @@ gatekeeper:
   extraExempt:
     namespaces: []
     namespacePrefixes: []
+
 
 certManager:
   enabled: true
