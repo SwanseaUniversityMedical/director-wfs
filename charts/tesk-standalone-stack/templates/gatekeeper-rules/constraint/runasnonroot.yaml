@@ -308,6 +308,7 @@ spec:
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]
+    excludedNamespaces: ["kube-system", "local-path-storage"]
   parameters:
     runAsUser:
       rule: MustRunAsNonRoot # MustRunAsNonRoot # RunAsAny 
@@ -329,5 +330,7 @@ spec:
       ranges:
         - min: 2
           max: 99999
+    exemptImages: ["docker.io/kindest/local-path-*"]
+
 
 {{- end }}

@@ -147,8 +147,8 @@ spec:
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]
-    excludedNamespaces: ["kube-system"]
+    excludedNamespaces: ["kube-system", "local-path-storage"]
   parameters:
-    exemptImages: []
+    exemptImages: ["docker.io/kindest/local-path-*"]
 
 {{- end }}
