@@ -78,7 +78,7 @@ spec:
 
               loki.write "local" {
                 endpoint {
-                  url = "http://loki-gateway:80"
+                  url = "http://loki-gateway:80/loki/api/v1/push"
                 }
               }
         
