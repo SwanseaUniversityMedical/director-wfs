@@ -21,6 +21,7 @@ spec:
         # falco needs to run in a priv ns
         pod-security.kubernetes.io/enforce: privileged
     automated:
+      enabled: true
       prune: true
       selfHeal: true
     syncOptions:
