@@ -55,9 +55,6 @@ spec:
           admin:
             existingSecret: "grafana-admin"
 
-          operator:
-            dashboardsConfigMapRefEnabled: true
-
           ingress:
             enabled: {{ .Values.global.ingress.enabled }}
             ingressClassName: {{ .Values.global.ingress.className }}
