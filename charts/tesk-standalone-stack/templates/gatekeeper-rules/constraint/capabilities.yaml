@@ -263,7 +263,7 @@ spec:
         kinds: ["Pod"]
     namespaces:
       - "{{ .Values.global.namespace }}"
-    excludedNamespaces: ["kube-system", "local-path-storage"]
+    excludedNamespaces: ["kube-system", "local-path-storage", "monitoring"]
   parameters:
     allowedCapabilities: []
     requiredDropCapabilities: ["ALL"]
