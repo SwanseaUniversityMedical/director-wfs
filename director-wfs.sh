@@ -456,6 +456,8 @@ KUBECTL_VERSION="${KUBECTL_VERSION:-v1.35.0}"
 KIND_VERSION="${KIND_VERSION:-v0.31.0}"
 HELM_VERSION="${HELM_VERSION:-v4.1.1}"
 YQ_VERSION="${YQ_VERSION:-v4.52.2}"
+K9S_VERSION="${K9S_VERSION:-v0.50.18}"
+FREELENS_VERSION="${FREELENS_VERSION:-v1.8.0}"
 
 # -----------------------------
 # Small helpers
@@ -705,6 +707,88 @@ install_yq() {
 }
 
 # -----------------------------
+# K9s
+# -----------------------------
+install_k9s() {
+  if have k9s; then
+    log "k9s already installed: $(k9s version --short 2>/dev/null || true)"
+    return 0
+  fi
+
+  need_internet_hint
+
+  local os arch url tmpdir
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) die "Unsupported arch for k9s: $(uname -m)" ;;
+  esac
+
+  url="https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_${os}_${arch}.tar.gz"
+  tmpdir="$(mktemp -d -t k9s.XXXXXX)"
+
+  log "Downloading k9s ${K9S_VERSION}..."
+  curl -fsSL "$url" -o "$tmpdir/k9s.tgz"
+  tar -xzf "$tmpdir/k9s.tgz" -C "$tmpdir"
+
+  sudo install -m 0755 "$tmpdir/k9s" /usr/local/bin/k9s
+  rm -rf "$tmpdir"
+
+  have k9s || die "k9s install failed"
+}
+
+
+# -----------------------------
+# Freelens
+# -----------------------------
+install_freelens_linux() {
+  if have freelens; then
+    log "freelens already installed"
+    return 0
+  fi
+
+  log "Installing Freelens AppImage..."
+
+  local url app
+  url="https://github.com/freelensapp/freelens/releases/${FREELENS_VERSION}/download/Freelens.AppImage"
+  app="/usr/local/bin/freelens"
+
+  sudo curl -fsSL "$url" -o "$app"
+  sudo chmod +x "$app"
+
+  log "Freelens installed at $app"
+}
+
+install_freelens_macos() {
+  if [[ -d /Applications/Freelens.app ]]; then
+    log "Freelens already installed"
+    return 0
+  fi
+
+  ensure_brew_macos
+  log "Installing Freelens via Homebrew cask..."
+  brew install --cask freelens || die "Failed to install Freelens"
+
+  warn "Freelens is a GUI app — you may need to approve it in macOS security settings."
+}
+
+install_freelens() {
+  case "$OS_FAMILY" in
+    ubuntu|debian|linux)
+      install_freelens_linux
+      ;;
+    macos)
+      install_freelens_macos
+      ;;
+    *)
+      warn "Skipping Freelens install on unsupported OS: $OS_FAMILY"
+      ;;
+  esac
+}
+
+# -----------------------------
 # Composite
 # -----------------------------
 ensure_prereqs() {
@@ -714,6 +798,8 @@ ensure_prereqs() {
   install_kind
   install_helm
   install_yq
+  install_k9s
+  install_freelens
   log "Prereqs OK."
 }
 
