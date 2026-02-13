@@ -457,7 +457,8 @@ KIND_VERSION="${KIND_VERSION:-v0.31.0}"
 HELM_VERSION="${HELM_VERSION:-v4.1.1}"
 YQ_VERSION="${YQ_VERSION:-v4.52.2}"
 K9S_VERSION="${K9S_VERSION:-v0.50.18}"
-FREELENS_VERSION="${FREELENS_VERSION:-v1.8.0}"
+FREELENS_VERSION="${FREELENS_VERSION:-1.8.0}"   # version number WITHOUT leading v
+FREELENS_TAG="v${FREELENS_VERSION}"
 
 # -----------------------------
 # Small helpers
@@ -744,34 +745,45 @@ install_k9s() {
 # Freelens
 # -----------------------------
 install_freelens_linux() {
+  # Prefer .deb on Debian/Ubuntu (clean uninstall/updates), fallback to AppImage if dpkg not available
   if have freelens; then
     log "freelens already installed"
     return 0
   fi
 
-  log "Installing Freelens AppImage..."
+  need_internet_hint
 
-  local url app
-  url="https://github.com/freelensapp/freelens/releases/${FREELENS_VERSION}/download/Freelens.AppImage"
-  app="/usr/local/bin/freelens"
+  local arch url tmp
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) die "Unsupported arch for Freelens: $(uname -m)" ;;
+  esac
 
-  sudo curl -fsSL "$url" -o "$app"
-  sudo chmod +x "$app"
-
-  log "Freelens installed at $app"
-}
-
-install_freelens_macos() {
-  if [[ -d /Applications/Freelens.app ]]; then
-    log "Freelens already installed"
+  # If dpkg exists, install the .deb
+  if have dpkg; then
+    url="https://github.com/freelensapp/freelens/releases/download/${FREELENS_TAG}/Freelens-${FREELENS_VERSION}-linux-${arch}.deb"
+    tmp="$(mktemp -t freelens.XXXXXX.deb)"
+    log "Downloading Freelens .deb (${FREELENS_TAG})..."
+    curl -fsSL "$url" -o "$tmp"
+    log "Installing Freelens via dpkg..."
+    sudo dpkg -i "$tmp" || sudo apt-get -f install -y
+    rm -f "$tmp"
     return 0
   fi
 
-  ensure_brew_macos
-  log "Installing Freelens via Homebrew cask..."
-  brew install --cask freelens || die "Failed to install Freelens"
+  # Fallback: AppImage
+  url="https://github.com/freelensapp/freelens/releases/download/${FREELENS_TAG}/Freelens-${FREELENS_VERSION}-linux-${arch}.AppImage"
+  tmp="$(mktemp -t freelens.XXXXXX.AppImage)"
 
-  warn "Freelens is a GUI app — you may need to approve it in macOS security settings."
+  log "Downloading Freelens AppImage (${FREELENS_TAG})..."
+  curl -fsSL "$url" -o "$tmp"
+  chmod +x "$tmp"
+
+  log "Installing Freelens AppImage to /usr/local/bin/freelens..."
+  sudo install -m 0755 "$tmp" /usr/local/bin/freelens
+  rm -f "$tmp"
 }
 
 install_freelens() {
