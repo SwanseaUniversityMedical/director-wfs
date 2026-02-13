@@ -1098,12 +1098,12 @@ ensure_htpasswd() {
   log "Installing htpasswd..."
   case "$OS_FAMILY" in
     ubuntu|debian|linux)
-      sudo apt-get update -y
-      sudo apt-get install -y apache2-utils
+      sudo apt-get update -y -qq >/dev/null
+      sudo apt-get install -y -qq apache2-utils >/dev/null
       ;;
     macos)
       ensure_brew_macos
-      brew install httpd   # provides htpasswd
+      brew install httpd >/dev/null
       ;;
     *)
       die "Unsupported OS for htpasswd install: $OS_FAMILY"
@@ -1117,7 +1117,7 @@ argocd_admin_bcrypt() {
   # Outputs bcrypt hash compatible with Argo CD
   # Uses: htpasswd -nbBC 10 "" password | tr -d ':\n' | sed 's/$2y/$2a/'
   local password="$1"
-  ensure_htpasswd
+  ensure_htpasswd >/dev/null 2>&1
 
   htpasswd -nbBC 10 "" "$password" \
     | tr -d ':\n' \
