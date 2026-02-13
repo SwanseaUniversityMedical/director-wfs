@@ -25,6 +25,8 @@ spec:
       - CreateNamespace=true
       - ApplyOutOfSyncOnly=true
       - ServerSideApply=true
+    retry:
+      refresh: true
   source:
     repoURL: {{ .Values.prometheus.repoURL }}
     chart: {{ .Values.prometheus.chart }}

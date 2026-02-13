@@ -23,6 +23,8 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ApplyOutOfSyncOnly=true
+    retry:
+      refresh: true
   source:
     repoURL: {{ .Values.tesk.repoURL }}
     chart: {{ .Values.tesk.chart }}

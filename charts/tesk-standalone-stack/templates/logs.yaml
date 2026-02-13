@@ -25,6 +25,8 @@ spec:
       - CreateNamespace=true
       - ApplyOutOfSyncOnly=true
       - ServerSideApply=true
+    retry:
+      refresh: true
   source:
     repoURL: {{ .Values.loki.repoURL }}
     chart: {{ .Values.loki.chart }}

@@ -24,6 +24,8 @@ spec:
       - CreateNamespace=true
       - ApplyOutOfSyncOnly=true
       - ServerSideApply=true
+    retry:
+      refresh: true
   source:
     repoURL: {{ .Values.gatekeeper.repoURL }}
     chart: {{ .Values.gatekeeper.chart }}
