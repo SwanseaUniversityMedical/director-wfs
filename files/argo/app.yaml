@@ -28,7 +28,7 @@ spec:
   source:
     repoURL: "harbor.federated-analytics.ac.uk/tesk/chart"
     chart: tesk-standalone-stack
-    targetRevision: "0.0.0-pr.2"
+    targetRevision: "1.1.0"
     helm:
       valuesObject: 
         global:
