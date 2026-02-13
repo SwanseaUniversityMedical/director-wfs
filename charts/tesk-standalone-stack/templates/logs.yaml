@@ -61,7 +61,7 @@ spec:
               cpu: 3
               memory: 4Gi
             requests:
-              cpu: 10Mi
+              cpu: "0.2"
               memory: 100Mi
           extraEnv:
             # Keep a little bit lower than memory limits
