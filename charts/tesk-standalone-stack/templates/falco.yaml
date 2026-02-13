@@ -20,6 +20,7 @@ spec:
       labels:
         # falco needs to run in a priv ns
         pod-security.kubernetes.io/enforce: privileged
+        "admission.gatekeeper.sh/ignore": "pleaseignore"
     automated:
       enabled: true
       prune: true

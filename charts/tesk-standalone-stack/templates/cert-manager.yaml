@@ -16,6 +16,9 @@ spec:
     namespace: {{ .Values.certManager.namespace }}
     server: https://kubernetes.default.svc
   syncPolicy:
+    managedNamespaceMetadata:
+      labels:
+        "admission.gatekeeper.sh/ignore": "pleaseignore"
     automated:
       enabled: true
       prune: true

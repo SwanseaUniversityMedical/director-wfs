@@ -16,6 +16,9 @@ spec:
     namespace: {{ .Values.gatekeeper.namespace }}
     server: https://kubernetes.default.svc
   syncPolicy:
+    managedNamespaceMetadata:
+      labels:
+        "admission.gatekeeper.sh/ignore": "pleaseignore"
     automated:
       enabled: true
       prune: true
@@ -39,10 +42,40 @@ spec:
         validatingWebhookExemptNamespacesLabels:
           "admission.gatekeeper.sh/ignore":
             - "pleaseignore"
+          "kubernetes.io/metadata.name":
+            - "kube-system"
+            - "kube-node-lease"
+            - "kube-public"
+            - "local-path-storage"
+            - "{{ .Values.gatekeeper.namespace }}"
+            - "{{ .Values.falco.namespace }}"
+            - "{{ .Values.prometheus.namespace }}"
+            - "{{ .Values.certManager.namespace }}"
+            # ingress controller
+            - "ingress-nginx"
+            - "argocd"
+            {{- with .Values.gatekeeper.extraExempt.namespaces }}
+            - "{{ . }}"
+            {{- end }}
 
         mutatingWebhookExemptNamespacesLabels:
           "admission.gatekeeper.sh/ignore":
             - "pleaseignore"
+          "kubernetes.io/metadata.name":
+            - "kube-system"
+            - "kube-node-lease"
+            - "kube-public"
+            - "local-path-storage"
+            - "{{ .Values.gatekeeper.namespace }}"
+            - "{{ .Values.falco.namespace }}"
+            - "{{ .Values.prometheus.namespace }}"
+            - "{{ .Values.certManager.namespace }}"
+            # ingress controller
+            - "ingress-nginx"
+            - "argocd"
+            {{- with .Values.gatekeeper.extraExempt.namespaces }}
+            - "{{ . }}"
+            {{- end }}
 
         controllerManager:
           exemptNamespaces:
