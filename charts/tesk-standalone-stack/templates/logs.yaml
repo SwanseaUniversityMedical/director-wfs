@@ -61,8 +61,8 @@ spec:
               cpu: 3
               memory: 4Gi
             requests:
-              cpu: 2
-              memory: 2Gi
+              cpu: 10Mi
+              memory: 100Mi
           extraEnv:
             # Keep a little bit lower than memory limits
             - name: GOMEMLIMIT
