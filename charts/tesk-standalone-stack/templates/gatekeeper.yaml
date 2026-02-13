@@ -46,6 +46,7 @@ spec:
             - "kube-system"
             - "kube-node-lease"
             - "kube-public"
+            - "local-path-storage"
             - "{{ .Values.gatekeeper.namespace }}"
             - "{{ .Values.falco.namespace }}"
             - "{{ .Values.prometheus.namespace }}"
