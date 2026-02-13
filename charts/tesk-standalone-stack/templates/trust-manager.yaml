@@ -16,13 +16,19 @@ spec:
     namespace: {{ .Values.certManager.namespace }}
     server: https://kubernetes.default.svc
   syncPolicy:
+    managedNamespaceMetadata:
+      labels:
+        "admission.gatekeeper.sh/ignore": "pleaseignore"
     automated:
+      enabled: true
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
       - ApplyOutOfSyncOnly=true
       - ServerSideApply=true
+    retry:
+      refresh: true
   source:
     repoURL: {{ .Values.trustManager.repoURL }}
     chart: {{ .Values.trustManager.chart }}

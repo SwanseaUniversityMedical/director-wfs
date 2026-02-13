@@ -448,6 +448,9 @@ log "  GRAFANA_PASSWORD: ${GRAFANA_PASSWORD:0:4}****"
 export DOCKER_DEFAULT_PLATFORM=
 set DOCKER_DEFAULT_PLATFORM=
 
+# if we don't set this we get open file exhaustion
+sudo sysctl -w fs.inotify.max_user_watches=10485760
+
 
 # -----------------------------
 # Prereq versions (override via env if needed)
@@ -456,6 +459,9 @@ KUBECTL_VERSION="${KUBECTL_VERSION:-v1.35.0}"
 KIND_VERSION="${KIND_VERSION:-v0.31.0}"
 HELM_VERSION="${HELM_VERSION:-v4.1.1}"
 YQ_VERSION="${YQ_VERSION:-v4.52.2}"
+K9S_VERSION="${K9S_VERSION:-v0.50.18}"
+FREELENS_VERSION="${FREELENS_VERSION:-1.8.0}"   # version number WITHOUT leading v
+FREELENS_TAG="v${FREELENS_VERSION}"
 
 # -----------------------------
 # Small helpers
@@ -705,6 +711,99 @@ install_yq() {
 }
 
 # -----------------------------
+# K9s
+# -----------------------------
+install_k9s() {
+  if have k9s; then
+    log "k9s already installed: $(k9s version --short 2>/dev/null || true)"
+    return 0
+  fi
+
+  need_internet_hint
+
+  local os arch url tmpdir
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) die "Unsupported arch for k9s: $(uname -m)" ;;
+  esac
+
+  url="https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_${os}_${arch}.tar.gz"
+  tmpdir="$(mktemp -d -t k9s.XXXXXX)"
+
+  log "Downloading k9s ${K9S_VERSION}..."
+  curl -fsSL "$url" -o "$tmpdir/k9s.tgz"
+  tar -xzf "$tmpdir/k9s.tgz" -C "$tmpdir"
+
+  sudo install -m 0755 "$tmpdir/k9s" /usr/local/bin/k9s
+  rm -rf "$tmpdir"
+
+  have k9s || die "k9s install failed"
+}
+
+
+# -----------------------------
+# Freelens
+# -----------------------------
+install_freelens_linux() {
+  # Prefer .deb on Debian/Ubuntu (clean uninstall/updates), fallback to AppImage if dpkg not available
+  if have freelens; then
+    log "freelens already installed"
+    return 0
+  fi
+
+  need_internet_hint
+
+  local arch url tmp
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) die "Unsupported arch for Freelens: $(uname -m)" ;;
+  esac
+
+  # If dpkg exists, install the .deb
+  if have dpkg; then
+    url="https://github.com/freelensapp/freelens/releases/download/${FREELENS_TAG}/Freelens-${FREELENS_VERSION}-linux-${arch}.deb"
+    tmp="$(mktemp -t freelens.XXXXXX.deb)"
+    log "Downloading Freelens .deb (${FREELENS_TAG})..."
+    curl -fsSL "$url" -o "$tmp"
+    log "Installing Freelens via dpkg..."
+    sudo dpkg -i "$tmp" || sudo apt-get -f install -y
+    rm -f "$tmp"
+    return 0
+  fi
+
+  # Fallback: AppImage
+  url="https://github.com/freelensapp/freelens/releases/download/${FREELENS_TAG}/Freelens-${FREELENS_VERSION}-linux-${arch}.AppImage"
+  tmp="$(mktemp -t freelens.XXXXXX.AppImage)"
+
+  log "Downloading Freelens AppImage (${FREELENS_TAG})..."
+  curl -fsSL "$url" -o "$tmp"
+  chmod +x "$tmp"
+
+  log "Installing Freelens AppImage to /usr/local/bin/freelens..."
+  sudo install -m 0755 "$tmp" /usr/local/bin/freelens
+  rm -f "$tmp"
+}
+
+install_freelens() {
+  case "$OS_FAMILY" in
+    ubuntu|debian|linux)
+      install_freelens_linux
+      ;;
+    macos)
+      install_freelens_macos
+      ;;
+    *)
+      warn "Skipping Freelens install on unsupported OS: $OS_FAMILY"
+      ;;
+  esac
+}
+
+# -----------------------------
 # Composite
 # -----------------------------
 ensure_prereqs() {
@@ -714,6 +813,8 @@ ensure_prereqs() {
   install_kind
   install_helm
   install_yq
+  install_k9s
+  install_freelens
   log "Prereqs OK."
 }
 
@@ -1000,12 +1101,12 @@ ensure_htpasswd() {
   log "Installing htpasswd..."
   case "$OS_FAMILY" in
     ubuntu|debian|linux)
-      sudo apt-get update -y
-      sudo apt-get install -y apache2-utils
+      sudo apt-get update -y -qq >/dev/null
+      sudo apt-get install -y -qq apache2-utils >/dev/null
       ;;
     macos)
       ensure_brew_macos
-      brew install httpd   # provides htpasswd
+      brew install httpd >/dev/null
       ;;
     *)
       die "Unsupported OS for htpasswd install: $OS_FAMILY"
@@ -1019,7 +1120,7 @@ argocd_admin_bcrypt() {
   # Outputs bcrypt hash compatible with Argo CD
   # Uses: htpasswd -nbBC 10 "" password | tr -d ':\n' | sed 's/$2y/$2a/'
   local password="$1"
-  ensure_htpasswd
+  ensure_htpasswd >/dev/null 2>&1
 
   htpasswd -nbBC 10 "" "$password" \
     | tr -d ':\n' \

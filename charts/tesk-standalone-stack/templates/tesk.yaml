@@ -17,11 +17,14 @@ spec:
     server: https://kubernetes.default.svc
   syncPolicy:
     automated:
+      enabled: true
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
       - ApplyOutOfSyncOnly=true
+    retry:
+      refresh: true
   source:
     repoURL: {{ .Values.tesk.repoURL }}
     chart: {{ .Values.tesk.chart }}
@@ -54,8 +57,11 @@ spec:
 
         tesk:
           image: "{{ .Values.tesk.image }}"
-          taskmaster_image_version: master
-          taskmaster_filer_image_version: user-file-issues
+          taskmaster_image_name: "{{ .Values.tesk.taskmasterImage.name }}"
+          taskmaster_image_version: "{{ .Values.tesk.taskmasterImage.version }}"
+          taskmaster_filer_image_name: "{{ .Values.tesk.filerImage.name }}"
+          taskmaster_filer_image_version: "{{ .Values.tesk.filerImage.version }}"
+          # taskmaster_filer_image_version: user-file-issues
           extraEnv:
             - name: "TESK_API_TASKMASTER_ENVIRONMENT_CONFIGMAP"
               value: "tesk-security-context-configmap"

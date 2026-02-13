@@ -16,13 +16,25 @@ spec:
     namespace: {{ .Values.gatekeeper.namespace }}
     server: https://kubernetes.default.svc
   syncPolicy:
+    managedNamespaceMetadata:
+      labels:
+        "admission.gatekeeper.sh/ignore": "pleaseignore"
     automated:
+      enabled: true
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
       - ApplyOutOfSyncOnly=true
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      refresh: true
+  ignoreDifferences:
+    - kind: CustomResourceDefinition
+      group: apiextensions.k8s.io
+      jsonPointers:
+        - /spec/preserveUnknownFields
   source:
     repoURL: {{ .Values.gatekeeper.repoURL }}
     chart: {{ .Values.gatekeeper.chart }}
@@ -36,16 +48,47 @@ spec:
         validatingWebhookExemptNamespacesLabels:
           "admission.gatekeeper.sh/ignore":
             - "pleaseignore"
+          "kubernetes.io/metadata.name":
+            - "kube-system"
+            - "kube-node-lease"
+            - "kube-public"
+            - "local-path-storage"
+            - "{{ .Values.gatekeeper.namespace }}"
+            - "{{ .Values.falco.namespace }}"
+            - "{{ .Values.prometheus.namespace }}"
+            - "{{ .Values.certManager.namespace }}"
+            # ingress controller
+            - "ingress-nginx"
+            - "argocd"
+            {{- with .Values.gatekeeper.extraExempt.namespaces }}
+            - "{{ . }}"
+            {{- end }}
 
         mutatingWebhookExemptNamespacesLabels:
           "admission.gatekeeper.sh/ignore":
             - "pleaseignore"
+          "kubernetes.io/metadata.name":
+            - "kube-system"
+            - "kube-node-lease"
+            - "kube-public"
+            - "local-path-storage"
+            - "{{ .Values.gatekeeper.namespace }}"
+            - "{{ .Values.falco.namespace }}"
+            - "{{ .Values.prometheus.namespace }}"
+            - "{{ .Values.certManager.namespace }}"
+            # ingress controller
+            - "ingress-nginx"
+            - "argocd"
+            {{- with .Values.gatekeeper.extraExempt.namespaces }}
+            - "{{ . }}"
+            {{- end }}
 
         controllerManager:
           exemptNamespaces:
             - "kube-system"
             - "kube-node-lease"
             - "kube-public"
+            - "local-path-storage"
             - "{{ .Values.gatekeeper.namespace }}"
             - "{{ .Values.falco.namespace }}"
             - "{{ .Values.prometheus.namespace }}"

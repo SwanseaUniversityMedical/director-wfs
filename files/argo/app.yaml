@@ -12,12 +12,14 @@ spec:
     server: https://kubernetes.default.svc
   syncPolicy:
     automated:
+      enabled: true
       selfHeal: true
     syncOptions:  
     - CreateNamespace=true 
     - ServerSideApply=true
     - SkipDryRunOnMissingResource=true
     retry:
+      refresh: true
       limit: 50
       backoff: 
         duration: "60s"
@@ -26,7 +28,7 @@ spec:
   source:
     repoURL: "harbor.federated-analytics.ac.uk/tesk/chart"
     chart: tesk-standalone-stack
-    targetRevision: "1.0.0"
+    targetRevision: "1.1.0"
     helm:
       valuesObject: 
         global:

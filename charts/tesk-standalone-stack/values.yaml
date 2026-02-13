@@ -29,14 +29,20 @@ tesk:
   repoURL: "harbor.ukserp.ac.uk/tesk/chart"
   chart: tesk
   chartVersion: "0.1.0"
-  image: "harbor.ukserp.ac.uk/tesk/tesk-api:1.0.0"
+  image: "harbor.ukserp.ac.uk/tesk/tesk-api:1.0.1"
+  taskmasterImage:
+    name: "harbor.ukserp.ac.uk/tesk/tesk-core-taskmaster"
+    version: "v0.10.5"
+  filerImage:
+    name: "harbor.ukserp.ac.uk/tesk/tesk-core-filer"
+    version: "v0.10.5"
 
   service:
     type: ClusterIP
 
 
 networkPolicy:
-  enabled: true
+  enabled: false
   # ip not dns name
   egressMinioIP: ""
   extraPolicy: []
@@ -61,6 +67,25 @@ prometheus:
   grafana:
     adminPassword: ""
 
+
+# we use loki for log store
+loki:
+  enabled: false
+  # no namespace as it goes into the prometheus ns
+  repoURL: "https://grafana.github.io/helm-charts"
+  chart: loki
+  chartVersion: "6.53.0"
+
+
+# alloy for log collection
+alloy:
+  enabled: false
+  # no namespace as it goes into the prometheus ns
+  repoURL: "https://grafana.github.io/helm-charts"
+  chart: alloy
+  chartVersion: "1.6.0"
+
+
 gatekeeper:
   enabled: true
   namespace: "gatekeeper-system"
@@ -70,6 +95,7 @@ gatekeeper:
   extraExempt:
     namespaces: []
     namespacePrefixes: []
+
 
 certManager:
   enabled: true
