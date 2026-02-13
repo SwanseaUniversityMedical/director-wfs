@@ -199,5 +199,9 @@ spec:
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]
+  parameters:
+    allowedHostPaths:
+      - pathPrefix: "/var/local-path-provisioner/"
+        readOnly: false
 
 {{- end }}
