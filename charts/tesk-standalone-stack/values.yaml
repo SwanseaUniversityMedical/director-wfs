@@ -29,7 +29,13 @@ tesk:
   repoURL: "harbor.ukserp.ac.uk/tesk/chart"
   chart: tesk
   chartVersion: "0.1.0"
-  image: "harbor.ukserp.ac.uk/tesk/tesk-api:1.0.0"
+  image: "harbor.ukserp.ac.uk/tesk/tesk-api:1.0.1"
+  taskmasterImage:
+    name: "harbor.ukserp.ac.uk/tesk/tesk-core-taskmaster"
+    version: "v0.10.5"
+  filerImage:
+    name: "harbor.ukserp.ac.uk/tesk/tesk-core-filer"
+    version: "v0.10.5"
 
   service:
     type: ClusterIP
