@@ -39,7 +39,17 @@ spec:
         loki:
           auth_enabled: false
           storage:
+            use_thanos_objstore: false
             type: filesystem
+            bucketNames:
+              chunks: "thisisafakebucket" # Helm chart is now mad when this isn't set
+              ruler: "thisisafakebucket"
+              admin: "thisisafakebucket"
+          commonStorageConfig:
+            type: filesystem
+          rulerConfig:
+            storage:
+              type: local
           commonConfig:
             replication_factor: 1
           schemaConfig:
@@ -61,6 +71,11 @@ spec:
 
         deploymentMode: SingleBinary
         singleBinary:
+          persistence:
+            enableStatefulSetAutoDeletePVC: true
+            storageClass: "{{ .Values.global.storage.defaultClass }}"
+            enabled: true
+            size: 5Gi
           replicas: 1
           resources:
             limits:
