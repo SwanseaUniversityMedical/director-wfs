@@ -28,6 +28,10 @@ spec:
         # this is the ip of the egress minio
         - ipBlock:
             cidr: {{ .Values.networkPolicy.egressMinioIP }}/32
+        # this is the kube api which i don't like that it needs access to
+        - ipBlock:
+            cidr: 10.96.0.1/32
+
     # cluster DNS or something?
     - ports:
         - protocol: UDP
