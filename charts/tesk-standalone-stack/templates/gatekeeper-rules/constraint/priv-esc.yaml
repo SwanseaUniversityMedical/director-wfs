@@ -158,6 +158,6 @@ spec:
       - apiGroups: [""]
         kinds: ["Pod"]
   parameters:
-    exemptImages: [""]
+    exemptImages: ["docker.io/kindest/local-path-*"]
 
 {{- end }}
