@@ -70,7 +70,7 @@ prometheus:
 
 # we use loki for log store
 loki:
-  enabled: true
+  enabled: false
   # no namespace as it goes into the prometheus ns
   repoURL: "https://grafana.github.io/helm-charts"
   chart: loki
@@ -79,7 +79,7 @@ loki:
 
 # alloy for log collection
 alloy:
-  enabled: true
+  enabled: false
   # no namespace as it goes into the prometheus ns
   repoURL: "https://grafana.github.io/helm-charts"
   chart: alloy
