@@ -27,8 +27,14 @@ spec:
       - CreateNamespace=true
       - ApplyOutOfSyncOnly=true
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
     retry:
       refresh: true
+  ignoreDifferences:
+    - kind: CustomResourceDefinition
+      group: apiextensions.k8s.io
+      jsonPointers:
+        - /spec/preserveUnknownFields
   source:
     repoURL: {{ .Values.gatekeeper.repoURL }}
     chart: {{ .Values.gatekeeper.chart }}
