@@ -67,6 +67,15 @@ prometheus:
   grafana:
     adminPassword: ""
 
+# we use loki for logs
+loki:
+  enabled: true
+  # no namespace as it goes into the prometheus ns
+  repoURL: "https://grafana.github.io/helm-charts"
+  chart: loki
+  chartVersion: "6.53.0"
+
+
 gatekeeper:
   enabled: true
   namespace: "gatekeeper-system"
