@@ -42,7 +42,7 @@ tesk:
 
 
 networkPolicy:
-  enabled: true
+  enabled: false
   # ip not dns name
   egressMinioIP: ""
   extraPolicy: []
