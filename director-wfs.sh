@@ -14,7 +14,7 @@ warn() { log "WARN: $*"; }
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  ./director-wfs.sh <dns_name> [dev_password] [s3_endpoint] [s3_access_key] [s3_secret_key] [s3_use_tls] [signing_cert_fullchain_or_path] [signing_key_or_path]
+  ./director-wfs.sh <dns_name> [dev_password] [s3_endpoint] [s3_access_key] [s3_secret_key] [s3_use_tls] [signing_cert_fullchain_or_path] [signing_key_or_path] [extra_egress_endpoints] [tesk_stack_chart_version]
 
 Args:
   1. dns_name                         (required)
@@ -25,6 +25,8 @@ Args:
   6. s3_use_tls                       (optional; true/false/1/0/yes/no)
   7. signing cert full chain OR path  (optional; .crt/.pem, chain: intermediate then root)
   8. signing cert key OR path         (optional; .key)
+  9. extra egress IPs / hostnames     (optional; comma-separated list)
+  10. tesk stack chart version        (optional; for dev/test purposes)
 
 Env fallbacks (if args missing):
   AWS_ACCESS_KEY_ID
@@ -47,6 +49,8 @@ S3_SECRET_KEY="${5:-}"
 S3_USE_TLS_RAW="${6:-}"
 SIGNING_CHAIN_IN="${7:-}"
 SIGNING_KEY_IN="${8:-}"
+EXTRA_EGRESS_RAW="${9:-}"
+TESK_STACK_CHART_VERSION="${10:-}"
 
 [[ -n "$DNS_NAME" ]] || { usage; die "dns_name (arg1) is required"; }
 
@@ -448,10 +452,6 @@ log "  GRAFANA_PASSWORD: ${GRAFANA_PASSWORD:0:4}****"
 export DOCKER_DEFAULT_PLATFORM=
 set DOCKER_DEFAULT_PLATFORM=
 
-# if we don't set this we get open file exhaustion
-sudo sysctl -w fs.inotify.max_user_watches=10485760
-
-
 # -----------------------------
 # Prereq versions (override via env if needed)
 # -----------------------------
@@ -473,6 +473,9 @@ need_internet_hint() {
 }
 
 ensure_curl_linux() {
+  # if we don't set this we get open file exhaustion
+  sudo sysctl -w fs.inotify.max_user_watches=10485760
+
   if ! have curl; then
     log "Installing curl..."
     sudo apt-get update -y
@@ -789,6 +792,44 @@ install_freelens_linux() {
   rm -f "$tmp"
 }
 
+
+install_freelens_macos() {
+  if [[ -d /Applications/Freelens.app ]]; then
+    log "Freelens already installed"
+    return 0
+  fi
+
+  # Prefer Homebrew if available
+  if have brew; then
+    log "Installing Freelens via Homebrew cask..."
+    brew install --cask freelens || die "Failed to install Freelens via brew"
+    return 0
+  fi
+
+  # Fallback: download DMG directly
+  need_internet_hint
+
+  local arch url tmp
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) die "Unsupported arch for Freelens on macOS: $(uname -m)" ;;
+  esac
+
+  # FREELENS_VERSION should be numeric, e.g. 1.8.0
+  # FREELENS_TAG should be v1.8.0
+  url="https://github.com/freelensapp/freelens/releases/download/${FREELENS_TAG}/Freelens-${FREELENS_VERSION}-macos-${arch}.dmg"
+  tmp="$(mktemp -t freelens.XXXXXX.dmg)"
+
+  log "Downloading Freelens DMG (${FREELENS_TAG})..."
+  curl -fsSL "$url" -o "$tmp"
+
+  warn "Downloaded Freelens DMG to: $tmp"
+  warn "Please open it and drag Freelens.app into /Applications:"
+  warn "  open \"$tmp\""
+}
+
 install_freelens() {
   case "$OS_FAMILY" in
     ubuntu|debian|linux)
@@ -1074,6 +1115,33 @@ apply_coredns_patch() {
     warn "CoreDNS rollout status check failed; continuing."
 }
 
+enable_cilium_hubble_with_ingress() {
+  local CILIUM_NS="kube-system"
+  local CILIUM_RELEASE="cilium"
+  local HUBBLE_HOST="hubble.${DNS_NAME}"
+
+  log "Enabling Cilium Hubble + Relay + UI (with ingress at ${HUBBLE_HOST})..."
+
+  helm upgrade "$CILIUM_RELEASE" oci://quay.io/cilium/charts/cilium \
+    --namespace "$CILIUM_NS" \
+    --reuse-values \
+    --set hubble.enabled=true \
+    --set hubble.relay.enabled=true \
+    --set hubble.ui.enabled=true \
+    --set hubble.ui.ingress.enabled=true \
+    --set hubble.ui.ingress.className=nginx \
+    --set hubble.ui.ingress.hosts[0]="${HUBBLE_HOST}" \
+    --wait --timeout 10m
+
+  log "Waiting for Hubble components to be ready..."
+
+  kubectl -n "$CILIUM_NS" rollout status deployment/cilium-operator --timeout=5m || true
+  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-relay --timeout=5m || true
+  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-ui --timeout=5m || true
+
+  log "Cilium Hubble enabled. UI should be available at: https://${HUBBLE_HOST}"
+}
+
 # -----------------------------
 # Composite step
 # -----------------------------
@@ -1081,6 +1149,7 @@ install_networking_and_patch_dns() {
   ensure_helm_repos
   install_or_upgrade_cilium
   install_or_upgrade_ingress_nginx
+  enable_cilium_hubble_with_ingress
   apply_coredns_patch
   log "Networking components installed and CoreDNS patched."
 }
@@ -1481,15 +1550,64 @@ PY
   return 1
 }
 
-derive_s3_egress_ip() {
+build_yaml_list_file() {
+  local src="$1"
+  local tmp
+  tmp="$(mktemp -t list.XXXXXX.yaml)"
+
+  if [[ ! -s "$src" ]]; then
+    echo "[]" >"$tmp"
+  else
+    sed '/^[[:space:]]*$/d' "$src" | sed 's/^/- /' >"$tmp"
+  fi
+
+  echo "$tmp"
+}
+
+parse_extra_egress_targets() {
+  local raw="$1"
+  local ips=()
+  local addrs=()
+
+  [[ -z "$raw" ]] && return 0
+
+  IFS=',' read -ra items <<<"$raw"
+
+  local item ip host
+  for item in "${items[@]}"; do
+    item="$(echo "$item" | xargs)"
+    [[ -z "$item" ]] && continue
+
+    host="$(extract_host "$item")"
+
+    if is_ipv4 "$host"; then
+      ips+=("$host")
+    else
+      # validate DNS resolves
+      ip="$(resolve_ipv4 "$host" || true)"
+      [[ -n "$ip" ]] || die "Could not resolve extra egress host '$host'"
+      addrs+=("$host")
+    fi
+  done
+
+  printf '%s\n' "${ips[@]}" > /tmp/extra-egress-ips.$$
+  printf '%s\n' "${addrs[@]}" > /tmp/extra-egress-addrs.$$
+
+  echo "/tmp/extra-egress-ips.$$ /tmp/extra-egress-addrs.$$"
+}
+
+derive_minio_endpoint_and_type() {
   [[ -n "${S3_ENDPOINT:-}" ]] || die "S3_ENDPOINT not set"
-  local host ip
+
+  local host
   host="$(extract_host "$S3_ENDPOINT")"
   [[ -n "$host" ]] || die "Could not extract host from S3_ENDPOINT='$S3_ENDPOINT'"
 
-  ip="$(resolve_ipv4 "$host" || true)"
-  [[ -n "$ip" ]] || die "Could not resolve IPv4 for S3 endpoint host '$host' (from '$S3_ENDPOINT')"
-  echo "$ip"
+  if is_ipv4 "$host"; then
+    echo "$host true"
+  else
+    echo "$host false"
+  fi
 }
 
 get_kube_server_git_version() {
@@ -1515,6 +1633,32 @@ print(sv.get("gitVersion",""))' 2>/dev/null || true)"
   echo "$ver"
 }
 
+get_kind_control_plane_container_name() {
+  # kind names containers like: <clustername>-control-plane
+  echo "${KIND_CLUSTER_NAME}-control-plane"
+}
+
+get_docker_container_ip() {
+  local container="$1"
+  have docker || return 1
+  docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container" 2>/dev/null || return 1
+}
+
+get_kubeconfig_server_host() {
+  # Extract cluster.server from the current context (or explicitly your kind context)
+  # Example: https://127.0.0.1:6443
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" config view --raw --minify \
+    -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true
+}
+
+extract_host_from_url() {
+  local url="$1"
+  url="${url#http://}"
+  url="${url#https://}"
+  url="${url%%/*}"   # drop path
+  url="${url%%:*}"   # drop port
+  echo "$url"
+}
 
 # ---- Template + apply ----
 template_and_apply_argo_app() {
@@ -1522,39 +1666,85 @@ template_and_apply_argo_app() {
   have yq || die "yq is required for templating (install_yq in prereqs)"
 
   # What to template
-  local ingress_host="$DNS_NAME" 
-  local minio_ip
-  minio_ip="$(derive_s3_egress_ip)"
-  local kube_version
+  local tesk_version="$TESK_STACK_CHART_VERSION"
+  local ingress_host="$DNS_NAME"
+  local kube_version 
   kube_version="$(get_kube_server_git_version)"
+
+  read -r minio_endpoint minio_is_ip <<<"$(derive_minio_endpoint_and_type)"
+
+  local extra_files extra_ips_file extra_addrs_file
+  extra_files="$(parse_extra_egress_targets "$EXTRA_EGRESS_RAW")"
+  read -r extra_ips_file extra_addrs_file <<<"$extra_files"
+
+  local extra_ips_yaml extra_addrs_yaml
+  extra_ips_yaml="$(build_yaml_list_file "$extra_ips_file")"
+  extra_addrs_yaml="$(build_yaml_list_file "$extra_addrs_file")"
 
   [[ -n "${GRAFANA_PASSWORD:-}" ]] || die "GRAFANA_PASSWORD not set"
 
   log "Templating Argo Application:"
   log "  ingress host: $ingress_host"
-  log "  s3 egress IP: $minio_ip"
+  log "  minio endpoint: $minio_endpoint (is_ip=$minio_is_ip)"
   log "  grafana password: ${GRAFANA_PASSWORD:0:4}****"
   log "  kubernetes version: $kube_version"
+  if [[ -s "$extra_ips_yaml" ]]; then
+    log "  extra egress IPs:"
+    sed 's/^/    /' "$extra_ips_yaml" >&2
+  fi
+
+  if [[ -s "$extra_addrs_yaml" ]]; then
+    log "  extra egress addrs:"
+    sed 's/^/    /' "$extra_addrs_yaml" >&2
+  fi
 
   cp -f "$ARGO_APP_SRC" "$ARGO_APP_RENDERED"
 
-  # Patch the specific fields inside valuesObject
-  yq -i "
-    .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
-    .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
-    .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
-    .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\"
-  " "$ARGO_APP_RENDERED"
+  if [[ -n "$tesk_version" ]]; then
+    log "  overriding TESK chart version: $tesk_version"
+    yq -i "
+      .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpoint = \"${minio_endpoint}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpointIsIP = ${minio_is_ip} |
+      .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
+      .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
+      .spec.source.targetRevision = \"${tesk_version}\" |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_ips_yaml}\") |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressAddrs = load(\"${extra_addrs_yaml}\") 
+    " "$ARGO_APP_RENDERED"
+  else
+    yq -i "
+      .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpoint = \"${minio_endpoint}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpointIsIP = ${minio_is_ip} |
+      .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
+      .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_ips_yaml}\") |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressAddrs = load(\"${extra_addrs_yaml}\") 
+    " "$ARGO_APP_RENDERED"
+  fi
+
+  rm -f "$extra_ips_file" "$extra_addrs_file"
+
+
 
   # Quick sanity checks
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.ingress.host' "$ARGO_APP_RENDERED")" == "$ingress_host" ]] \
     || die "Failed to set ingress.host in rendered app.yaml"
 
-  [[ "$(yq -r '.spec.source.helm.valuesObject.networkPolicy.egressMinioIP' "$ARGO_APP_RENDERED")" == "$minio_ip" ]] \
-    || die "Failed to set networkPolicy.egressMinioIP in rendered app.yaml"
+  [[ "$(yq -r '.spec.source.helm.valuesObject.networkPolicy.egressMinioEndpoint' "$ARGO_APP_RENDERED")" == "$minio_endpoint" ]] \
+    || die "Failed to set networkPolicy.egressMinioEndpoint in rendered app.yaml"
 
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.kubeVersion' "$ARGO_APP_RENDERED")" == "$kube_version" ]] \
     || die "Failed to set global.kubeVersion in rendered app.yaml"
+
+  yq -e '.spec.source.helm.valuesObject.networkPolicy.extraEgressIPs | type == "!!seq"' \
+  "$ARGO_APP_RENDERED" >/dev/null || die "extraEgressIPs not rendered as list"
+
+  if [[ -n "$tesk_version" ]]; then
+  [[ "$(yq -r '.spec.source.targetRevision' "$ARGO_APP_RENDERED")" == "$tesk_version" ]] \
+    || die "Failed to set spec.source.targetRevision in rendered app.yaml"
+  fi
 
   log "Rendered Argo Application written to: $ARGO_APP_RENDERED"
 
@@ -1615,6 +1805,49 @@ wait_for_argocd_application_synced_healthy() {
   die "Argo Application did not become Synced + Healthy within ${WAIT_APP_TIMEOUT_SECS}s"
 }
 
+get_deployed_tesk_chart_version() {
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" \
+    get application "$ARGO_APP_NAME" \
+    -o jsonpath='{.status.sync.revision}' 2>/dev/null || true
+}
+
+
+enable_cilium_hubble_grafana_dashboards() {
+  local CILIUM_NS="kube-system"
+  local CILIUM_RELEASE="cilium"
+  local HUBBLE_HOST="hubble.${DNS_NAME}"
+
+  log "Enabling Cilium Hubble Grafana dashboards"
+
+  helm upgrade "$CILIUM_RELEASE" oci://quay.io/cilium/charts/cilium \
+    --namespace "$CILIUM_NS" \
+    --reuse-values \
+    --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp,httpV2:exemplars=true;labelsContext=source_ip\,source_namespace\,source_workload\,destination_ip\,destination_namespace\,destination_workload\,traffic_direction}" \
+    --set hubble.metrics.serviceMonitor.enabled=true \
+    --set hubble.metrics.dashboards.enabled=true \
+    --set hubble.metrics.dashboards.namespace=monitoring \
+    --set hubble.relay.prometheus.enabled=true \
+    --set hubble.relay.prometheus.serviceMonitor.enabled=true \
+    --set prometheus.enabled=true \
+    --set prometheus.serviceMonitor.enabled=true \
+    --set dashboards.enabled=true \
+    --set dashboards.namespace=monitoring \
+    --set envoy.prometheus.serviceMonitor.enabled=true \
+    --set operator.prometheus.serviceMonitor.enabled=true \
+    --set operator.dashboards.enabled=true \
+    --set operator.dashboards.namespace=monitoring \
+    --wait --timeout 10m
+
+  log "Waiting for Hubble components to be ready..."
+
+  kubectl -n "$CILIUM_NS" rollout status deployment/cilium-operator --timeout=5m || true
+  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-relay --timeout=5m || true
+  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-ui --timeout=5m || true
+
+  log "Cilium Hubble enabled. UI should be available at: https://${HUBBLE_HOST}"
+}
+
+
 print_final_outputs() {
   local argo_addr="argocd.${DNS_NAME}"
   local grafana_addr="grafana.${DNS_NAME}"
@@ -1623,10 +1856,21 @@ print_final_outputs() {
   local argo_user="admin"
   local grafana_user="admin"
 
+  local deployed_chart_version
+  deployed_chart_version="$(get_deployed_tesk_chart_version)"
+
+  if [[ -z "$deployed_chart_version" ]]; then
+    deployed_chart_version="(unknown)"
+  fi
+
   echo
   echo "========================================"
   echo "TESK stack deployed successfully"
   echo "========================================"
+  echo "TESK chart version:   ${deployed_chart_version}"
+  echo
+  echo "Hubble UI addr:       hubble.${DNS_NAME}"
+  echo 
   echo "Argo DNS addr:        ${argo_addr}"
   echo "Argo admin user:      ${argo_user}"
   echo "Argo admin pw:        ${ARGO_PASSWORD}"
@@ -1644,6 +1888,7 @@ print_final_outputs() {
 
 final_wait_and_print() {
   wait_for_argocd_application_synced_healthy
+  enable_cilium_hubble_grafana_dashboards
   print_final_outputs
 }
 

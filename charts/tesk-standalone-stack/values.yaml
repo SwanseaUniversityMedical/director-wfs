@@ -6,6 +6,7 @@ global:
   # set this if you're doing local app development
   # if this isn't set to true you'll need cert-manager installed on your cluster and configured to sign certs
   localDev: false
+  selfSignedRootCA: false
   kubeVersion: ""
   argoProject: tesk-stack
   namespace: tesk-stack
@@ -42,9 +43,15 @@ tesk:
 
 
 networkPolicy:
-  enabled: false
-  # ip not dns name
-  egressMinioIP: ""
+  enabled: true
+  # can be ip or dns name, please no port
+  egressMinioEndpoint: ""
+  egressMinioEndpointIsIP: false
+  # egress will be allowed on all ports to these ips/32
+  extraEgressIPs: []
+  # egress will be allowed on all ports to these dns names
+  extraEgressAddrs: []
+  # if you want to control ports to ips then do that here
   extraPolicy: []
 
 
