@@ -29,13 +29,9 @@ spec:
         - {{ .Values.networkPolicy.egressMinioIP }}/32
       toPorts:
         - ports:
-            - port: "1"
-              protocol: TCP
-          # This is the Cilium equivalent of an endPort range:
-          # It applies to the previous port.
-          rules:
-            # no L7 rules; pure L4 allow
-            {}
+          - port: "1"
+            endPort: 32768
+            protocol: TCP
 
     # 3) Kubernetes API (
     - toEntities:
