@@ -30,7 +30,11 @@ spec:
             cidr: {{ .Values.networkPolicy.egressMinioIP }}/32
         # this is the kube api which i don't like that it needs access to
         - ipBlock:
-            cidr: 10.96.0.1/32
+            cidr: {{ .Values.networkPolicy.kubeApiIP }}/32
+        {{- range .Values.networkPolicy.extraEgressIPs }}
+        - ipBlock:
+            cidr: {{ . }}/32
+        {{- end }}
 
     # cluster DNS or something?
     - ports:

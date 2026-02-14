@@ -14,7 +14,7 @@ warn() { log "WARN: $*"; }
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  ./director-wfs.sh <dns_name> [dev_password] [s3_endpoint] [s3_access_key] [s3_secret_key] [s3_use_tls] [signing_cert_fullchain_or_path] [signing_key_or_path]
+  ./director-wfs.sh <dns_name> [dev_password] [s3_endpoint] [s3_access_key] [s3_secret_key] [s3_use_tls] [signing_cert_fullchain_or_path] [signing_key_or_path] [extra_egress_endpoints]
 
 Args:
   1. dns_name                         (required)
@@ -25,6 +25,7 @@ Args:
   6. s3_use_tls                       (optional; true/false/1/0/yes/no)
   7. signing cert full chain OR path  (optional; .crt/.pem, chain: intermediate then root)
   8. signing cert key OR path         (optional; .key)
+  9. extra egress IPs / hostnames     (optional; comma-separated list)
 
 Env fallbacks (if args missing):
   AWS_ACCESS_KEY_ID
@@ -47,6 +48,7 @@ S3_SECRET_KEY="${5:-}"
 S3_USE_TLS_RAW="${6:-}"
 SIGNING_CHAIN_IN="${7:-}"
 SIGNING_KEY_IN="${8:-}"
+EXTRA_EGRESS_RAW="${9:-}"
 
 [[ -n "$DNS_NAME" ]] || { usage; die "dns_name (arg1) is required"; }
 
@@ -1481,6 +1483,32 @@ PY
   return 1
 }
 
+parse_extra_egress_ips() {
+  local raw="$1"
+  local out=()
+
+  [[ -z "$raw" ]] && return 0
+
+  IFS=',' read -ra items <<<"$raw"
+
+  local item ip
+  for item in "${items[@]}"; do
+    item="$(echo "$item" | xargs)"   # trim
+    [[ -z "$item" ]] && continue
+
+    if is_ipv4 "$item"; then
+      ip="$item"
+    else
+      ip="$(resolve_ipv4 "$item" || true)"
+      [[ -n "$ip" ]] || die "Could not resolve extra egress host '$item' to IPv4"
+    fi
+
+    out+=("$ip")
+  done
+
+  printf '%s\n' "${out[@]}"
+}
+
 derive_s3_egress_ip() {
   [[ -n "${S3_ENDPOINT:-}" ]] || die "S3_ENDPOINT not set"
   local host ip
@@ -1515,6 +1543,55 @@ print(sv.get("gitVersion",""))' 2>/dev/null || true)"
   echo "$ver"
 }
 
+get_kind_control_plane_container_name() {
+  # kind names containers like: <clustername>-control-plane
+  echo "${KIND_CLUSTER_NAME}-control-plane"
+}
+
+get_docker_container_ip() {
+  local container="$1"
+  have docker || return 1
+  docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container" 2>/dev/null || return 1
+}
+
+get_kubeconfig_server_host() {
+  # Extract cluster.server from the current context (or explicitly your kind context)
+  # Example: https://127.0.0.1:6443
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" config view --raw --minify \
+    -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true
+}
+
+extract_host_from_url() {
+  local url="$1"
+  url="${url#http://}"
+  url="${url#https://}"
+  url="${url%%/*}"   # drop path
+  url="${url%%:*}"   # drop port
+  echo "$url"
+}
+
+get_kube_api_endpoint_ip() {
+  local cp ip server host
+
+  # 1) Preferred: KIND control-plane container IP
+  cp="$(get_kind_control_plane_container_name)"
+  ip="$(get_docker_container_ip "$cp" || true)"
+  if [[ -n "$ip" ]] && is_ipv4 "$ip"; then
+    echo "$ip"
+    return 0
+  fi
+
+  # 2) Fallback: kubeconfig server host -> resolve to IPv4
+  server="$(get_kubeconfig_server_host)"
+  [[ -n "$server" ]] || die "Could not read kubeconfig server URL for context kind-${KIND_CLUSTER_NAME}"
+  host="$(extract_host_from_url "$server")"
+  [[ -n "$host" ]] || die "Could not extract host from kubeconfig server URL: $server"
+
+  ip="$(resolve_ipv4 "$host" || true)"
+  [[ -n "$ip" ]] || die "Could not resolve IPv4 for kube API host '$host' (from '$server')"
+  echo "$ip"
+}
+
 
 # ---- Template + apply ----
 template_and_apply_argo_app() {
@@ -1523,10 +1600,11 @@ template_and_apply_argo_app() {
 
   # What to template
   local ingress_host="$DNS_NAME" 
-  local minio_ip
+  local minio_ip kube_version kube_api_ip extra_egress_ips
   minio_ip="$(derive_s3_egress_ip)"
-  local kube_version
   kube_version="$(get_kube_server_git_version)"
+  kube_api_ip="$(get_kube_api_endpoint_ip)"
+  extra_egress_ips="$(parse_extra_egress_ips "$EXTRA_EGRESS_RAW")"
 
   [[ -n "${GRAFANA_PASSWORD:-}" ]] || die "GRAFANA_PASSWORD not set"
 
@@ -1535,6 +1613,11 @@ template_and_apply_argo_app() {
   log "  s3 egress IP: $minio_ip"
   log "  grafana password: ${GRAFANA_PASSWORD:0:4}****"
   log "  kubernetes version: $kube_version"
+  log "  kube api ip:   $kube_api_ip"
+  if [[ -n "$extra_egress_ips" ]]; then
+    log "  extra egress IPs:"
+    printf '%s\n' "$extra_egress_ips" | sed 's/^/    - /' >&2
+  fi
 
   cp -f "$ARGO_APP_SRC" "$ARGO_APP_RENDERED"
 
@@ -1542,8 +1625,11 @@ template_and_apply_argo_app() {
   yq -i "
     .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
     .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
+    .spec.source.helm.valuesObject.networkPolicy.kubeApiIP = \"${kube_api_ip}\" |
     .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
-    .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\"
+    .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
+    .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs =
+    ($(printf '%s\n' "$extra_egress_ips" | yq -R -s 'split(\"\\n\")[:-1]'))
   " "$ARGO_APP_RENDERED"
 
   # Quick sanity checks
@@ -1555,6 +1641,12 @@ template_and_apply_argo_app() {
 
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.kubeVersion' "$ARGO_APP_RENDERED")" == "$kube_version" ]] \
     || die "Failed to set global.kubeVersion in rendered app.yaml"
+
+  [[ "$(yq -r '.spec.source.helm.valuesObject.networkPolicy.kubeApiIP' "$ARGO_APP_RENDERED")" == "$kube_api_ip" ]] \
+  || die "Failed to set networkPolicy.kubeApiIP in rendered app.yaml"
+
+  yq -e '.spec.source.helm.valuesObject.networkPolicy.extraEgressIPs | type == "!!seq"' \
+  "$ARGO_APP_RENDERED" >/dev/null || die "extraEgressIPs not rendered as list"
 
   log "Rendered Argo Application written to: $ARGO_APP_RENDERED"
 
