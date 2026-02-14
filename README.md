@@ -25,7 +25,6 @@ The s3 config args are only used to pass through the configuration to TESK so it
 As we don't pass any certificate files the script will generate its own self-signed Root CA and Intermediate signing cert.
 
 
-## TODO
+## Product Website
 
-- Much better explanation of what the script does
-- Add links to the Youtube videos walking through GUI and headless deployments
+Product Description (https://ukserp.notion.site/director-workflow-server-d-wfs)
