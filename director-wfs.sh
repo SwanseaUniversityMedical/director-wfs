@@ -1122,7 +1122,7 @@ enable_cilium_hubble_with_ingress() {
 
   log "Enabling Cilium Hubble + Relay + UI (with ingress at ${HUBBLE_HOST})..."
 
-  helm upgrade "$CILIUM_RELEASE" cilium/cilium \
+  helm upgrade "$CILIUM_RELEASE" oci://quay.io/cilium/charts/cilium \
     --namespace "$CILIUM_NS" \
     --reuse-values \
     --set hubble.enabled=true \
@@ -1130,9 +1130,7 @@ enable_cilium_hubble_with_ingress() {
     --set hubble.ui.enabled=true \
     --set hubble.ui.ingress.enabled=true \
     --set hubble.ui.ingress.className=nginx \
-    --set hubble.ui.ingress.hosts[0].host="${HUBBLE_HOST}" \
-    --set hubble.ui.ingress.hosts[0].paths[0].path="/" \
-    --set hubble.ui.ingress.hosts[0].paths[0].pathType=Prefix \
+    --set hubble.ui.ingress.hosts[0]="${HUBBLE_HOST}" \
     --wait --timeout 10m
 
   log "Waiting for Hubble components to be ready..."
@@ -1813,6 +1811,33 @@ get_deployed_tesk_chart_version() {
     -o jsonpath='{.status.sync.revision}' 2>/dev/null || true
 }
 
+
+enable_cilium_hubble_grafana_dashboards() {
+  local CILIUM_NS="kube-system"
+  local CILIUM_RELEASE="cilium"
+  local HUBBLE_HOST="hubble.${DNS_NAME}"
+
+  log "Enabling Cilium Hubble Grafana dashboards"
+
+  helm upgrade "$CILIUM_RELEASE" oci://quay.io/cilium/charts/cilium \
+    --namespace "$CILIUM_NS" \
+    --reuse-values \
+    --set hubble.metrics.enabled=true \
+    --set hubble.metrics.serviceMonitor.enabled=true \
+    --set hubble.metrics.dashboards.enabled=true \
+    --set hubble.metrics.dashboards.namespace=monitoring \
+    --wait --timeout 10m
+
+  log "Waiting for Hubble components to be ready..."
+
+  kubectl -n "$CILIUM_NS" rollout status deployment/cilium-operator --timeout=5m || true
+  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-relay --timeout=5m || true
+  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-ui --timeout=5m || true
+
+  log "Cilium Hubble enabled. UI should be available at: https://${HUBBLE_HOST}"
+}
+
+
 print_final_outputs() {
   local argo_addr="argocd.${DNS_NAME}"
   local grafana_addr="grafana.${DNS_NAME}"
@@ -1853,6 +1878,7 @@ print_final_outputs() {
 
 final_wait_and_print() {
   wait_for_argocd_application_synced_healthy
+  enable_cilium_hubble_grafana_dashboards
   print_final_outputs
 }
 
