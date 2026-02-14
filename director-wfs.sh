@@ -14,7 +14,7 @@ warn() { log "WARN: $*"; }
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  ./director-wfs.sh <dns_name> [dev_password] [s3_endpoint] [s3_access_key] [s3_secret_key] [s3_use_tls] [signing_cert_fullchain_or_path] [signing_key_or_path] [extra_egress_endpoints]
+  ./director-wfs.sh <dns_name> [dev_password] [s3_endpoint] [s3_access_key] [s3_secret_key] [s3_use_tls] [signing_cert_fullchain_or_path] [signing_key_or_path] [extra_egress_endpoints] [tesk_stack_chart_version]
 
 Args:
   1. dns_name                         (required)
@@ -26,6 +26,7 @@ Args:
   7. signing cert full chain OR path  (optional; .crt/.pem, chain: intermediate then root)
   8. signing cert key OR path         (optional; .key)
   9. extra egress IPs / hostnames     (optional; comma-separated list)
+  10. tesk stack chart version        (optional; for dev/test purposes)
 
 Env fallbacks (if args missing):
   AWS_ACCESS_KEY_ID
@@ -49,6 +50,7 @@ S3_USE_TLS_RAW="${6:-}"
 SIGNING_CHAIN_IN="${7:-}"
 SIGNING_KEY_IN="${8:-}"
 EXTRA_EGRESS_RAW="${9:-}"
+TESK_STACK_CHART_VERSION="${10:-}"
 
 [[ -n "$DNS_NAME" ]] || { usage; die "dns_name (arg1) is required"; }
 
@@ -1605,6 +1607,11 @@ template_and_apply_argo_app() {
   kube_version="$(get_kube_server_git_version)"
   kube_api_ip="$(get_kube_api_endpoint_ip)"
   extra_egress_ips="$(parse_extra_egress_ips "$EXTRA_EGRESS_RAW")"
+  local tesk_version="$TESK_CHART_VERSION"
+
+  if [[ -n "$TESK_STACK_CHART_VERSION" ]]; then
+    extra_args+=(--version "$INGRESS_CHART_VERSION")
+  fi
 
   [[ -n "${GRAFANA_PASSWORD:-}" ]] || die "GRAFANA_PASSWORD not set"
 
@@ -1621,7 +1628,19 @@ template_and_apply_argo_app() {
 
   cp -f "$ARGO_APP_SRC" "$ARGO_APP_RENDERED"
 
-  # Patch the specific fields inside valuesObject
+  if [[ -n "$tesk_version" ]]; then
+  log "  overriding TESK chart version: $tesk_version"
+  yq -i "
+    .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
+    .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
+    .spec.source.helm.valuesObject.networkPolicy.kubeApiIP = \"${kube_api_ip}\" |
+    .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
+    .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
+    .spec.source.targetRevision = \"${tesk_version}\" |
+    .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs =
+      ($(printf '%s\n' "$extra_egress_ips" | yq -R -s 'split(\"\\n\")[:-1]'))
+  " "$ARGO_APP_RENDERED"
+else
   yq -i "
     .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
     .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
@@ -1629,8 +1648,9 @@ template_and_apply_argo_app() {
     .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
     .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
     .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs =
-    ($(printf '%s\n' "$extra_egress_ips" | yq -R -s 'split(\"\\n\")[:-1]'))
+      ($(printf '%s\n' "$extra_egress_ips" | yq -R -s 'split(\"\\n\")[:-1]'))
   " "$ARGO_APP_RENDERED"
+fi
 
   # Quick sanity checks
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.ingress.host' "$ARGO_APP_RENDERED")" == "$ingress_host" ]] \
@@ -1647,6 +1667,11 @@ template_and_apply_argo_app() {
 
   yq -e '.spec.source.helm.valuesObject.networkPolicy.extraEgressIPs | type == "!!seq"' \
   "$ARGO_APP_RENDERED" >/dev/null || die "extraEgressIPs not rendered as list"
+
+  if [[ -n "$tesk_version" ]]; then
+  [[ "$(yq -r '.spec.source.targetRevision' "$ARGO_APP_RENDERED")" == "$tesk_version" ]] \
+    || die "Failed to set spec.source.targetRevision in rendered app.yaml"
+  fi
 
   log "Rendered Argo Application written to: $ARGO_APP_RENDERED"
 
@@ -1707,6 +1732,12 @@ wait_for_argocd_application_synced_healthy() {
   die "Argo Application did not become Synced + Healthy within ${WAIT_APP_TIMEOUT_SECS}s"
 }
 
+get_deployed_tesk_chart_version() {
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" \
+    get application "$ARGO_APP_NAME" \
+    -o jsonpath='{.status.sync.revision}' 2>/dev/null || true
+}
+
 print_final_outputs() {
   local argo_addr="argocd.${DNS_NAME}"
   local grafana_addr="grafana.${DNS_NAME}"
@@ -1715,10 +1746,19 @@ print_final_outputs() {
   local argo_user="admin"
   local grafana_user="admin"
 
+  local deployed_chart_version
+  deployed_chart_version="$(get_deployed_tesk_chart_version)"
+
+  if [[ -z "$deployed_chart_version" ]]; then
+    deployed_chart_version="(unknown)"
+  fi
+
   echo
   echo "========================================"
   echo "TESK stack deployed successfully"
   echo "========================================"
+  echo "TESK chart version:  ${deployed_chart_version}"
+  echo 
   echo "Argo DNS addr:        ${argo_addr}"
   echo "Argo admin user:      ${argo_user}"
   echo "Argo admin pw:        ${ARGO_PASSWORD}"
