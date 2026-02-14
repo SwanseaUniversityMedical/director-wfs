@@ -452,10 +452,6 @@ log "  GRAFANA_PASSWORD: ${GRAFANA_PASSWORD:0:4}****"
 export DOCKER_DEFAULT_PLATFORM=
 set DOCKER_DEFAULT_PLATFORM=
 
-# if we don't set this we get open file exhaustion
-sudo sysctl -w fs.inotify.max_user_watches=10485760
-
-
 # -----------------------------
 # Prereq versions (override via env if needed)
 # -----------------------------
@@ -477,6 +473,9 @@ need_internet_hint() {
 }
 
 ensure_curl_linux() {
+  # if we don't set this we get open file exhaustion
+  sudo sysctl -w fs.inotify.max_user_watches=10485760
+
   if ! have curl; then
     log "Installing curl..."
     sudo apt-get update -y
@@ -791,6 +790,44 @@ install_freelens_linux() {
   log "Installing Freelens AppImage to /usr/local/bin/freelens..."
   sudo install -m 0755 "$tmp" /usr/local/bin/freelens
   rm -f "$tmp"
+}
+
+
+install_freelens_macos() {
+  if [[ -d /Applications/Freelens.app ]]; then
+    log "Freelens already installed"
+    return 0
+  fi
+
+  # Prefer Homebrew if available
+  if have brew; then
+    log "Installing Freelens via Homebrew cask..."
+    brew install --cask freelens || die "Failed to install Freelens via brew"
+    return 0
+  fi
+
+  # Fallback: download DMG directly
+  need_internet_hint
+
+  local arch url tmp
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) die "Unsupported arch for Freelens on macOS: $(uname -m)" ;;
+  esac
+
+  # FREELENS_VERSION should be numeric, e.g. 1.8.0
+  # FREELENS_TAG should be v1.8.0
+  url="https://github.com/freelensapp/freelens/releases/download/${FREELENS_TAG}/Freelens-${FREELENS_VERSION}-macos-${arch}.dmg"
+  tmp="$(mktemp -t freelens.XXXXXX.dmg)"
+
+  log "Downloading Freelens DMG (${FREELENS_TAG})..."
+  curl -fsSL "$url" -o "$tmp"
+
+  warn "Downloaded Freelens DMG to: $tmp"
+  warn "Please open it and drag Freelens.app into /Applications:"
+  warn "  open \"$tmp\""
 }
 
 install_freelens() {
@@ -1594,6 +1631,26 @@ get_kube_api_endpoint_ip() {
   echo "$ip"
 }
 
+build_extra_egress_yaml_file() {
+  local ips_newline="$1"
+  local tmp
+  tmp="$(mktemp -t extra-egress.XXXXXX.yaml)"
+
+  if [[ -z "${ips_newline//[[:space:]]/}" ]]; then
+    echo "[]" >"$tmp"
+    echo "$tmp"
+    return 0
+  fi
+
+  # one IP per line -> YAML list
+  printf '%s\n' "$ips_newline" | sed '/^[[:space:]]*$/d' | sed 's/^/- /' >"$tmp"
+
+  # if somehow empty, force []
+  [[ -s "$tmp" ]] || echo "[]" >"$tmp"
+
+  echo "$tmp"
+}
+
 
 # ---- Template + apply ----
 template_and_apply_argo_app() {
@@ -1602,16 +1659,13 @@ template_and_apply_argo_app() {
 
   # What to template
   local ingress_host="$DNS_NAME" 
-  local minio_ip kube_version kube_api_ip extra_egress_ips
+  local minio_ip kube_version kube_api_ip extra_egress_ips extra_egress_yaml
   minio_ip="$(derive_s3_egress_ip)"
   kube_version="$(get_kube_server_git_version)"
   kube_api_ip="$(get_kube_api_endpoint_ip)"
   extra_egress_ips="$(parse_extra_egress_ips "$EXTRA_EGRESS_RAW")"
-  local tesk_version="$TESK_CHART_VERSION"
-
-  if [[ -n "$TESK_STACK_CHART_VERSION" ]]; then
-    extra_args+=(--version "$INGRESS_CHART_VERSION")
-  fi
+  extra_egress_yaml="$(build_extra_egress_yaml_file "$extra_egress_ips")"
+  local tesk_version="$TESK_STACK_CHART_VERSION"
 
   [[ -n "${GRAFANA_PASSWORD:-}" ]] || die "GRAFANA_PASSWORD not set"
 
@@ -1629,28 +1683,30 @@ template_and_apply_argo_app() {
   cp -f "$ARGO_APP_SRC" "$ARGO_APP_RENDERED"
 
   if [[ -n "$tesk_version" ]]; then
-  log "  overriding TESK chart version: $tesk_version"
-  yq -i "
-    .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
-    .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
-    .spec.source.helm.valuesObject.networkPolicy.kubeApiIP = \"${kube_api_ip}\" |
-    .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
-    .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
-    .spec.source.targetRevision = \"${tesk_version}\" |
-    .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs =
-      ($(printf '%s\n' "$extra_egress_ips" | yq -R -s 'split(\"\\n\")[:-1]'))
-  " "$ARGO_APP_RENDERED"
-else
-  yq -i "
-    .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
-    .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
-    .spec.source.helm.valuesObject.networkPolicy.kubeApiIP = \"${kube_api_ip}\" |
-    .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
-    .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
-    .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs =
-      ($(printf '%s\n' "$extra_egress_ips" | yq -R -s 'split(\"\\n\")[:-1]'))
-  " "$ARGO_APP_RENDERED"
-fi
+    log "  overriding TESK chart version: $tesk_version"
+    yq -i "
+      .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
+      .spec.source.helm.valuesObject.networkPolicy.kubeApiIP = \"${kube_api_ip}\" |
+      .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
+      .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
+      .spec.source.targetRevision = \"${tesk_version}\" |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_egress_yaml}\")
+    " "$ARGO_APP_RENDERED"
+  else
+    yq -i "
+      .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
+      .spec.source.helm.valuesObject.networkPolicy.kubeApiIP = \"${kube_api_ip}\" |
+      .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
+      .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_egress_yaml}\")
+    " "$ARGO_APP_RENDERED"
+  fi
+
+  rm -f "$extra_egress_yaml"
+
+
 
   # Quick sanity checks
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.ingress.host' "$ARGO_APP_RENDERED")" == "$ingress_host" ]] \

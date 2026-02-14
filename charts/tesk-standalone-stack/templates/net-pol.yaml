@@ -31,6 +31,8 @@ spec:
         # this is the kube api which i don't like that it needs access to
         - ipBlock:
             cidr: {{ .Values.networkPolicy.kubeApiIP }}/32
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubeApiSvcIP }}/32
         {{- range .Values.networkPolicy.extraEgressIPs }}
         - ipBlock:
             cidr: {{ . }}/32
