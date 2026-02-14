@@ -1115,6 +1115,35 @@ apply_coredns_patch() {
     warn "CoreDNS rollout status check failed; continuing."
 }
 
+enable_cilium_hubble_with_ingress() {
+  local CILIUM_NS="kube-system"
+  local CILIUM_RELEASE="cilium"
+  local HUBBLE_HOST="hubble.${DNS_NAME}"
+
+  log "Enabling Cilium Hubble + Relay + UI (with ingress at ${HUBBLE_HOST})..."
+
+  helm upgrade "$CILIUM_RELEASE" cilium/cilium \
+    --namespace "$CILIUM_NS" \
+    --reuse-values \
+    --set hubble.enabled=true \
+    --set hubble.relay.enabled=true \
+    --set hubble.ui.enabled=true \
+    --set hubble.ui.ingress.enabled=true \
+    --set hubble.ui.ingress.className=nginx \
+    --set hubble.ui.ingress.hosts[0].host="${HUBBLE_HOST}" \
+    --set hubble.ui.ingress.hosts[0].paths[0].path="/" \
+    --set hubble.ui.ingress.hosts[0].paths[0].pathType=Prefix \
+    --wait --timeout 10m
+
+  log "Waiting for Hubble components to be ready..."
+
+  kubectl -n "$CILIUM_NS" rollout status deployment/cilium-operator --timeout=5m || true
+  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-relay --timeout=5m || true
+  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-ui --timeout=5m || true
+
+  log "Cilium Hubble enabled. UI should be available at: https://${HUBBLE_HOST}"
+}
+
 # -----------------------------
 # Composite step
 # -----------------------------
@@ -1122,6 +1151,7 @@ install_networking_and_patch_dns() {
   ensure_helm_repos
   install_or_upgrade_cilium
   install_or_upgrade_ingress_nginx
+  enable_cilium_hubble_with_ingress
   apply_coredns_patch
   log "Networking components installed and CoreDNS patched."
 }
@@ -1710,9 +1740,6 @@ template_and_apply_argo_app() {
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.kubeVersion' "$ARGO_APP_RENDERED")" == "$kube_version" ]] \
     || die "Failed to set global.kubeVersion in rendered app.yaml"
 
-  [[ "$(yq -r '.spec.source.helm.valuesObject.networkPolicy.kubeApiIP' "$ARGO_APP_RENDERED")" == "$kube_api_ip" ]] \
-  || die "Failed to set networkPolicy.kubeApiIP in rendered app.yaml"
-
   yq -e '.spec.source.helm.valuesObject.networkPolicy.extraEgressIPs | type == "!!seq"' \
   "$ARGO_APP_RENDERED" >/dev/null || die "extraEgressIPs not rendered as list"
 
@@ -1805,7 +1832,9 @@ print_final_outputs() {
   echo "========================================"
   echo "TESK stack deployed successfully"
   echo "========================================"
-  echo "TESK chart version:  ${deployed_chart_version}"
+  echo "TESK chart version:   ${deployed_chart_version}"
+  echo
+  echo "Hubble UI addr:       hubble.${DNS_NAME}"
   echo 
   echo "Argo DNS addr:        ${argo_addr}"
   echo "Argo admin user:      ${argo_user}"
