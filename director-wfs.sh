@@ -1522,41 +1522,64 @@ PY
   return 1
 }
 
-parse_extra_egress_ips() {
+build_yaml_list_file() {
+  local src="$1"
+  local tmp
+  tmp="$(mktemp -t list.XXXXXX.yaml)"
+
+  if [[ ! -s "$src" ]]; then
+    echo "[]" >"$tmp"
+  else
+    sed '/^[[:space:]]*$/d' "$src" | sed 's/^/- /' >"$tmp"
+  fi
+
+  echo "$tmp"
+}
+
+parse_extra_egress_targets() {
   local raw="$1"
-  local out=()
+  local ips=()
+  local addrs=()
 
   [[ -z "$raw" ]] && return 0
 
   IFS=',' read -ra items <<<"$raw"
 
-  local item ip
+  local item ip host
   for item in "${items[@]}"; do
-    item="$(echo "$item" | xargs)"   # trim
+    item="$(echo "$item" | xargs)"
     [[ -z "$item" ]] && continue
 
-    if is_ipv4 "$item"; then
-      ip="$item"
-    else
-      ip="$(resolve_ipv4 "$item" || true)"
-      [[ -n "$ip" ]] || die "Could not resolve extra egress host '$item' to IPv4"
-    fi
+    host="$(extract_host "$item")"
 
-    out+=("$ip")
+    if is_ipv4 "$host"; then
+      ips+=("$host")
+    else
+      # validate DNS resolves
+      ip="$(resolve_ipv4 "$host" || true)"
+      [[ -n "$ip" ]] || die "Could not resolve extra egress host '$host'"
+      addrs+=("$host")
+    fi
   done
 
-  printf '%s\n' "${out[@]}"
+  printf '%s\n' "${ips[@]}" > /tmp/extra-egress-ips.$$
+  printf '%s\n' "${addrs[@]}" > /tmp/extra-egress-addrs.$$
+
+  echo "/tmp/extra-egress-ips.$$ /tmp/extra-egress-addrs.$$"
 }
 
-derive_s3_egress_ip() {
+derive_minio_endpoint_and_type() {
   [[ -n "${S3_ENDPOINT:-}" ]] || die "S3_ENDPOINT not set"
-  local host ip
+
+  local host
   host="$(extract_host "$S3_ENDPOINT")"
   [[ -n "$host" ]] || die "Could not extract host from S3_ENDPOINT='$S3_ENDPOINT'"
 
-  ip="$(resolve_ipv4 "$host" || true)"
-  [[ -n "$ip" ]] || die "Could not resolve IPv4 for S3 endpoint host '$host' (from '$S3_ENDPOINT')"
-  echo "$ip"
+  if is_ipv4 "$host"; then
+    echo "$host true"
+  else
+    echo "$host false"
+  fi
 }
 
 get_kube_server_git_version() {
@@ -1609,75 +1632,44 @@ extract_host_from_url() {
   echo "$url"
 }
 
-get_kube_api_endpoint_ip() {
-  local cp ip server host
-
-  # 1) Preferred: KIND control-plane container IP
-  cp="$(get_kind_control_plane_container_name)"
-  ip="$(get_docker_container_ip "$cp" || true)"
-  if [[ -n "$ip" ]] && is_ipv4 "$ip"; then
-    echo "$ip"
-    return 0
-  fi
-
-  # 2) Fallback: kubeconfig server host -> resolve to IPv4
-  server="$(get_kubeconfig_server_host)"
-  [[ -n "$server" ]] || die "Could not read kubeconfig server URL for context kind-${KIND_CLUSTER_NAME}"
-  host="$(extract_host_from_url "$server")"
-  [[ -n "$host" ]] || die "Could not extract host from kubeconfig server URL: $server"
-
-  ip="$(resolve_ipv4 "$host" || true)"
-  [[ -n "$ip" ]] || die "Could not resolve IPv4 for kube API host '$host' (from '$server')"
-  echo "$ip"
-}
-
-build_extra_egress_yaml_file() {
-  local ips_newline="$1"
-  local tmp
-  tmp="$(mktemp -t extra-egress.XXXXXX.yaml)"
-
-  if [[ -z "${ips_newline//[[:space:]]/}" ]]; then
-    echo "[]" >"$tmp"
-    echo "$tmp"
-    return 0
-  fi
-
-  # one IP per line -> YAML list
-  printf '%s\n' "$ips_newline" | sed '/^[[:space:]]*$/d' | sed 's/^/- /' >"$tmp"
-
-  # if somehow empty, force []
-  [[ -s "$tmp" ]] || echo "[]" >"$tmp"
-
-  echo "$tmp"
-}
-
-
 # ---- Template + apply ----
 template_and_apply_argo_app() {
   [[ -f "$ARGO_APP_SRC" ]] || die "Argo app file not found: $ARGO_APP_SRC"
   have yq || die "yq is required for templating (install_yq in prereqs)"
 
   # What to template
-  local ingress_host="$DNS_NAME" 
-  local minio_ip kube_version kube_api_ip extra_egress_ips extra_egress_yaml
-  minio_ip="$(derive_s3_egress_ip)"
-  kube_version="$(get_kube_server_git_version)"
-  kube_api_ip="$(get_kube_api_endpoint_ip)"
-  extra_egress_ips="$(parse_extra_egress_ips "$EXTRA_EGRESS_RAW")"
-  extra_egress_yaml="$(build_extra_egress_yaml_file "$extra_egress_ips")"
   local tesk_version="$TESK_STACK_CHART_VERSION"
+  local ingress_host="$DNS_NAME"
+  local kube_version 
+  kube_version="$(get_kube_server_git_version)"
+
+  read -r minio_endpoint minio_is_ip <<<"$(derive_minio_endpoint_and_type)"
+
+  local extra_files extra_ips_file extra_addrs_file
+  extra_files="$(parse_extra_egress_targets "$EXTRA_EGRESS_RAW")"
+  read -r extra_ips_file extra_addrs_file <<<"$extra_files"
+
+  local extra_ips_yaml extra_addrs_yaml
+  extra_ips_yaml="$(build_yaml_list_file "$extra_ips_file")"
+  extra_addrs_yaml="$(build_yaml_list_file "$extra_addrs_file")"
+
+  rm -f "$extra_ips_file" "$extra_addrs_file"
 
   [[ -n "${GRAFANA_PASSWORD:-}" ]] || die "GRAFANA_PASSWORD not set"
 
   log "Templating Argo Application:"
   log "  ingress host: $ingress_host"
-  log "  s3 egress IP: $minio_ip"
+  log "  minio endpoint: $minio_endpoint (is_ip=$minio_is_ip)"
   log "  grafana password: ${GRAFANA_PASSWORD:0:4}****"
   log "  kubernetes version: $kube_version"
-  log "  kube api ip:   $kube_api_ip"
-  if [[ -n "$extra_egress_ips" ]]; then
+  if [[ -s "$extra_ips_yaml" ]]; then
     log "  extra egress IPs:"
-    printf '%s\n' "$extra_egress_ips" | sed 's/^/    - /' >&2
+    sed 's/^/    /' "$extra_ips_yaml" >&2
+  fi
+
+  if [[ -s "$extra_addrs_yaml" ]]; then
+    log "  extra egress addrs:"
+    sed 's/^/    /' "$extra_addrs_yaml" >&2
   fi
 
   cp -f "$ARGO_APP_SRC" "$ARGO_APP_RENDERED"
@@ -1686,21 +1678,23 @@ template_and_apply_argo_app() {
     log "  overriding TESK chart version: $tesk_version"
     yq -i "
       .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
-      .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
-      .spec.source.helm.valuesObject.networkPolicy.kubeApiIP = \"${kube_api_ip}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpoint = \"${minio_endpoint}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpointIsIP = ${minio_is_ip} |
       .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
       .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
       .spec.source.targetRevision = \"${tesk_version}\" |
-      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_egress_yaml}\")
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_ips_yaml}\") |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressAddrs = load(\"${extra_addrs_yaml}\") 
     " "$ARGO_APP_RENDERED"
   else
     yq -i "
       .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
-      .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
-      .spec.source.helm.valuesObject.networkPolicy.kubeApiIP = \"${kube_api_ip}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpoint = \"${minio_endpoint}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpointIsIP = ${minio_is_ip} |
       .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
       .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
-      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_egress_yaml}\")
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_ips_yaml}\") |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressAddrs = load(\"${extra_addrs_yaml}\") 
     " "$ARGO_APP_RENDERED"
   fi
 

@@ -25,13 +25,23 @@ spec:
               protocol: TCP
 
     # 2) MinIO egress IP (you were allowing TCP 1-32768; keep that intent)
+    {{- if .Values.networkPolicy.egressMinioEndpointIsIP }}
     - toCIDR:
-        - {{ .Values.networkPolicy.egressMinioIP }}/32
+        - {{ .Values.networkPolicy.egressMinioEndpoint }}/32
       toPorts:
         - ports:
           - port: "1"
             endPort: 32768
             protocol: TCP
+    {{- else }}
+    - toFQDNs:
+        - matchName: "{{ .Values.networkPolicy.egressMinioEndpoint }}"
+      toPorts:
+        - ports:
+          - port: "1"
+            endPort: 32768
+            protocol: TCP
+    {{- end }}
 
     # 3) Kubernetes API (
     - toEntities:
@@ -53,7 +63,17 @@ spec:
               endPort: 32768
               protocol: TCP
 
-    # 6) DNS to kube-dns in kube-system
+    - toFQDNs:
+        {{- range .Values.networkPolicy.extraEgressAddrs }}
+        - matchName: "{{ . }}"
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: "1"
+              endPort: 32768
+              protocol: TCP
+
+    # 5) DNS to kube-dns in kube-system
     - toEndpoints:
         - matchLabels:
             "k8s:io.kubernetes.pod.namespace": kube-system

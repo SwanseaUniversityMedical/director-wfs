@@ -44,13 +44,13 @@ tesk:
 
 networkPolicy:
   enabled: true
-  # ip not dns name
-  egressMinioIP: ""
-  # tesk needs to talk to the kubeapi
-  kubeApiIP: ""
-  kubeApiSvcIP: "10.96.0.1"
+  # can be ip or dns name, please no port
+  egressMinioEndpoint: ""
+  egressMinioEndpointIsIP: false
   # egress will be allowed on all ports to these ips/32
   extraEgressIPs: []
+  # egress will be allowed on all ports to these dns names
+  extraEgressAddrs: []
   # if you want to control ports to ips then do that here
   extraPolicy: []
 
