@@ -1,6 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: tesk
   labels:
@@ -8,52 +9,67 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "5"
 spec:
-  podSelector:
+  endpointSelector:
     matchExpressions:
       - key: job-name
         operator: Exists
-  egress:
-    # temp allow all egress for debugging
-    - {} 
-    - ports:
-        - protocol: TCP
-          port: 8080
-      to:
-        - podSelector:
-            matchLabels:
-              app: tesk-api
-    - ports:
-        - protocol: TCP
-          port: 1
-          endPort: 32768
-      to:
-        # this is the ip of the egress minio
-        - ipBlock:
-            cidr: {{ .Values.networkPolicy.egressMinioIP }}/32
-        # this is the kube api which i don't like that it needs access to
-        - ipBlock:
-            cidr: {{ .Values.networkPolicy.kubeApiIP }}/32
-        - ipBlock:
-            cidr: {{ .Values.networkPolicy.kubeApiSvcIP }}/32
-        {{- range .Values.networkPolicy.extraEgressIPs }}
-        - ipBlock:
-            cidr: {{ . }}/32
-        {{- end }}
 
-    # cluster DNS or something?
-    - ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-      to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-  policyTypes:
-    - Egress
+  egress:
+    # 1) tesk-api on 8080 (same-namespace pod selector)
+    - toEndpoints:
+        - matchLabels:
+            app: tesk-api
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+
+    # 2) MinIO egress IP (you were allowing TCP 1-32768; keep that intent)
+    - toCIDR:
+        - {{ .Values.networkPolicy.egressMinioIP }}/32
+      toPorts:
+        - ports:
+            - port: "1"
+              protocol: TCP
+          # This is the Cilium equivalent of an endPort range:
+          # It applies to the previous port.
+          rules:
+            # no L7 rules; pure L4 allow
+            {}
+
+    # 3) Kubernetes API (
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+
+
+    # 4) Extra egress IPs on all ports so we don't have to derive that
+    - toCIDRSet:
+        {{- range .Values.networkPolicy.extraEgressIPs }}
+        - cidr: {{ . }}/32
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: "1"
+              endPort: 32768
+              protocol: TCP
+
+    # 6) DNS to kube-dns in kube-system
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+            - matchPattern: "*"
 
 {{- end }}
