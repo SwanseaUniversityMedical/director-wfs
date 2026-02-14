@@ -1822,10 +1822,20 @@ enable_cilium_hubble_grafana_dashboards() {
   helm upgrade "$CILIUM_RELEASE" oci://quay.io/cilium/charts/cilium \
     --namespace "$CILIUM_NS" \
     --reuse-values \
-    --set hubble.metrics.enabled=true \
+    --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp,httpV2:exemplars=true;labelsContext=source_ip\,source_namespace\,source_workload\,destination_ip\,destination_namespace\,destination_workload\,traffic_direction}" \
     --set hubble.metrics.serviceMonitor.enabled=true \
     --set hubble.metrics.dashboards.enabled=true \
     --set hubble.metrics.dashboards.namespace=monitoring \
+    --set hubble.relay.prometheus.enabled=true \
+    --set hubble.relay.prometheus.serviceMonitor.enabled=true \
+    --set prometheus.enabled=true \
+    --set prometheus.serviceMonitor.enabled=true \
+    --set dashboards.enabled=true \
+    --set dashboards.namespace=monitoring \
+    --set envoy.prometheus.serviceMonitor.enabled=true \
+    --set operator.prometheus.serviceMonitor.enabled=true \
+    --set operator.dashboards.enabled=true \
+    --set operator.dashboards.namespace=monitoring \
     --wait --timeout 10m
 
   log "Waiting for Hubble components to be ready..."
