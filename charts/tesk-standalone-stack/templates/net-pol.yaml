@@ -13,6 +13,8 @@ spec:
       - key: job-name
         operator: Exists
   egress:
+    # temp allow all egress for debugging
+    - {} 
     - ports:
         - protocol: TCP
           port: 8080
