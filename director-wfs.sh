@@ -1653,8 +1653,6 @@ template_and_apply_argo_app() {
   extra_ips_yaml="$(build_yaml_list_file "$extra_ips_file")"
   extra_addrs_yaml="$(build_yaml_list_file "$extra_addrs_file")"
 
-  rm -f "$extra_ips_file" "$extra_addrs_file"
-
   [[ -n "${GRAFANA_PASSWORD:-}" ]] || die "GRAFANA_PASSWORD not set"
 
   log "Templating Argo Application:"
@@ -1698,7 +1696,7 @@ template_and_apply_argo_app() {
     " "$ARGO_APP_RENDERED"
   fi
 
-  rm -f "$extra_egress_yaml"
+  rm -f "$extra_ips_file" "$extra_addrs_file"
 
 
 
