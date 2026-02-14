@@ -46,8 +46,13 @@ spec:
             certClusterIssuer: "ca-issuer"
 
         networkPolicy:
-          # ip not dns name
-          egressMinioIP: ""
+          # can be ip or dns name, please no port
+          egressMinioEndpoint: ""
+          egressMinioEndpointIsIP: false
+          # egress will be allowed on all ports to these ips/32
+          extraEgressIPs: []
+          # egress will be allowed on all ports to these dns names
+          extraEgressAddrs: []
 
         prometheus:
           grafana:

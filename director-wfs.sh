@@ -1704,8 +1704,8 @@ template_and_apply_argo_app() {
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.ingress.host' "$ARGO_APP_RENDERED")" == "$ingress_host" ]] \
     || die "Failed to set ingress.host in rendered app.yaml"
 
-  [[ "$(yq -r '.spec.source.helm.valuesObject.networkPolicy.egressMinioIP' "$ARGO_APP_RENDERED")" == "$minio_ip" ]] \
-    || die "Failed to set networkPolicy.egressMinioIP in rendered app.yaml"
+  [[ "$(yq -r '.spec.source.helm.valuesObject.networkPolicy.egressMinioEndpoint' "$ARGO_APP_RENDERED")" == "$minio_endpoint" ]] \
+    || die "Failed to set networkPolicy.egressMinioEndpoint in rendered app.yaml"
 
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.kubeVersion' "$ARGO_APP_RENDERED")" == "$kube_version" ]] \
     || die "Failed to set global.kubeVersion in rendered app.yaml"
