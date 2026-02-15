@@ -1003,7 +1003,7 @@ CILIUM_RELEASE="${CILIUM_RELEASE:-cilium}"
 
 # Cilium chart version optional pin
 CILIUM_CHART_VERSION="${CILIUM_CHART_VERSION:-1.19.0}"   # e.g. "1.15.6"
-INGRESS_CHART_VERSION="${INGRESS_CHART_VERSION:-}" # e.g. "4.11.3"
+INGRESS_CHART_VERSION="${INGRESS_CHART_VERSION:-4.14.3}" # e.g. "4.11.3"
 
 # Repo YAML locations (from cloned repo root)
 DEPS_DIR="${DEPS_DIR:-${REPO_DIR}/files/deps}"
@@ -1115,32 +1115,6 @@ apply_coredns_patch() {
     warn "CoreDNS rollout status check failed; continuing."
 }
 
-enable_cilium_hubble_with_ingress() {
-  local CILIUM_NS="kube-system"
-  local CILIUM_RELEASE="cilium"
-  local HUBBLE_HOST="hubble.${DNS_NAME}"
-
-  log "Enabling Cilium Hubble + Relay + UI (with ingress at ${HUBBLE_HOST})..."
-
-  helm upgrade "$CILIUM_RELEASE" oci://quay.io/cilium/charts/cilium \
-    --namespace "$CILIUM_NS" \
-    --reuse-values \
-    --set hubble.enabled=true \
-    --set hubble.relay.enabled=true \
-    --set hubble.ui.enabled=true \
-    --set hubble.ui.ingress.enabled=true \
-    --set hubble.ui.ingress.className=nginx \
-    --set hubble.ui.ingress.hosts[0]="${HUBBLE_HOST}" \
-    --wait --timeout 10m
-
-  log "Waiting for Hubble components to be ready..."
-
-  kubectl -n "$CILIUM_NS" rollout status deployment/cilium-operator --timeout=5m || true
-  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-relay --timeout=5m || true
-  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-ui --timeout=5m || true
-
-  log "Cilium Hubble enabled. UI should be available at: https://${HUBBLE_HOST}"
-}
 
 # -----------------------------
 # Composite step
@@ -1149,7 +1123,6 @@ install_networking_and_patch_dns() {
   ensure_helm_repos
   install_or_upgrade_cilium
   install_or_upgrade_ingress_nginx
-  enable_cilium_hubble_with_ingress
   apply_coredns_patch
   log "Networking components installed and CoreDNS patched."
 }
@@ -1244,7 +1217,7 @@ ARGOCD_NS="${ARGOCD_NS:-argocd}"
 ARGOCD_RELEASE="${ARGOCD_RELEASE:-argocd}"
 
 # Pin chart version optionally
-ARGOCD_CHART_VERSION="${ARGOCD_CHART_VERSION:-}"   # e.g. "7.6.12"
+ARGOCD_CHART_VERSION="${ARGOCD_CHART_VERSION:-9.4.2}"   # e.g. "7.6.12"
 
 # Rendered values file from previous step
 ARGOCD_VALUES_FILE="${ARGOCD_VALUES_FILE:-$ARGO_VALUES_RENDERED}"
@@ -1726,8 +1699,6 @@ template_and_apply_argo_app() {
 
   rm -f "$extra_ips_file" "$extra_addrs_file"
 
-
-
   # Quick sanity checks
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.ingress.host' "$ARGO_APP_RENDERED")" == "$ingress_host" ]] \
     || die "Failed to set ingress.host in rendered app.yaml"
@@ -1762,47 +1733,54 @@ WAIT_APP_TIMEOUT_SECS="${WAIT_APP_TIMEOUT_SECS:-1800}"  # 30 minutes
 
 # Helpers to read status
 get_app_sync_status() {
+  local app_name="${1:-${ARGO_APP_NAME:-}}"
   kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" \
-    get application "$ARGO_APP_NAME" -o jsonpath='{.status.sync.status}' 2>/dev/null || true
+    get application "$app_name" -o jsonpath='{.status.sync.status}' 2>/dev/null || true
 }
+
 get_app_health_status() {
+  local app_name="${1:-${ARGO_APP_NAME:-}}"
   kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" \
-    get application "$ARGO_APP_NAME" -o jsonpath='{.status.health.status}' 2>/dev/null || true
+    get application "$app_name" -o jsonpath='{.status.health.status}' 2>/dev/null || true
 }
 
 wait_for_argocd_application_synced_healthy() {
-  log "Waiting up to ${WAIT_APP_TIMEOUT_SECS}s for Argo Application '${ARGO_APP_NAME}' to be Synced + Healthy..."
+  local app_name="${1:-${ARGO_APP_NAME:-}}"
+
+  [[ -n "$app_name" ]] || die "wait_for_argocd_application_synced_healthy: no app name provided and ARGO_APP_NAME not set"
+
+  log "Waiting up to ${WAIT_APP_TIMEOUT_SECS}s for Argo Application '${app_name}' to be Synced + Healthy..."
 
   local deadline=$(( $(date +%s) + WAIT_APP_TIMEOUT_SECS ))
   local sync health
 
   while (( $(date +%s) < deadline )); do
-    sync="$(get_app_sync_status)"
-    health="$(get_app_health_status)"
+    sync="$(get_app_sync_status "$app_name")"
+    health="$(get_app_health_status "$app_name")"
 
     if [[ "$sync" == "Synced" && "$health" == "Healthy" ]]; then
-      log "Application is Synced + Healthy."
+      log "Application '${app_name}' is Synced + Healthy."
       return 0
     fi
 
-    log "Application status: sync='${sync:-?}' health='${health:-?}' (waiting...)"
+    log "Application '${app_name}' status: sync='${sync:-?}' health='${health:-?}' (waiting...)"
     sleep 10
   done
 
-  warn "Timed out waiting for Synced + Healthy."
+  warn "Timed out waiting for Synced + Healthy for Application '${app_name}'."
 
   # Diagnostics
   warn "Current Application YAML summary:"
-  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get application "$ARGO_APP_NAME" -o yaml || true
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get application "$app_name" -o yaml || true
 
   warn "Argo Application conditions:"
-  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get application "$ARGO_APP_NAME" \
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get application "$app_name" \
     -o jsonpath='{range .status.conditions[*]}{.type}{" - "}{.message}{"\n"}{end}' || true
 
   warn "Recent events in argocd namespace:"
   kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get events --sort-by=.lastTimestamp | tail -n 50 || true
 
-  die "Argo Application did not become Synced + Healthy within ${WAIT_APP_TIMEOUT_SECS}s"
+  die "Argo Application '${app_name}' did not become Synced + Healthy within ${WAIT_APP_TIMEOUT_SECS}s"
 }
 
 get_deployed_tesk_chart_version() {
@@ -1811,46 +1789,181 @@ get_deployed_tesk_chart_version() {
     -o jsonpath='{.status.sync.revision}' 2>/dev/null || true
 }
 
+# -----------------------------------
+# ADOPT HELM-INSTALLED DEPS WITH ARGO
+# ----------------------------------- 
 
-enable_cilium_hubble_grafana_dashboards() {
-  local CILIUM_NS="kube-system"
-  local CILIUM_RELEASE="cilium"
-  local HUBBLE_HOST="hubble.${DNS_NAME}"
+#######################
+# CILIUM
+####################### 
+CILIUM_APP_SRC="${CILIUM_APP_SRC:-${REPO_DIR}/files/argo/adopted/cilium.yaml}"
+CILIUM_APP_RENDERED="${CILIUM_APP_RENDERED:-${REPO_DIR}/files/argo/adopted/cilium.rendered.yaml}"
 
-  log "Enabling Cilium Hubble Grafana dashboards"
+template_and_apply_cilium_argo_app() {
+  [[ -f "$CILIUM_APP_SRC" ]] || die "Cilium Argo app file not found: $CILIUM_APP_SRC"
+  have yq || die "yq is required for templating (install_yq in prereqs)"
 
-  helm upgrade "$CILIUM_RELEASE" oci://quay.io/cilium/charts/cilium \
-    --namespace "$CILIUM_NS" \
-    --reuse-values \
-    --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp,httpV2:exemplars=true;labelsContext=source_ip\,source_namespace\,source_workload\,destination_ip\,destination_namespace\,destination_workload\,traffic_direction}" \
-    --set hubble.metrics.serviceMonitor.enabled=true \
-    --set hubble.metrics.dashboards.enabled=true \
-    --set hubble.metrics.dashboards.namespace=monitoring \
-    --set hubble.relay.prometheus.enabled=true \
-    --set hubble.relay.prometheus.serviceMonitor.enabled=true \
-    --set prometheus.enabled=true \
-    --set prometheus.serviceMonitor.enabled=true \
-    --set dashboards.enabled=true \
-    --set dashboards.namespace=monitoring \
-    --set envoy.prometheus.serviceMonitor.enabled=true \
-    --set operator.prometheus.serviceMonitor.enabled=true \
-    --set operator.dashboards.enabled=true \
-    --set operator.dashboards.namespace=monitoring \
-    --wait --timeout 10m
+  # What to template
+  local cilium_ns="$CILIUM_NS"
+  local cilium_release="$CILIUM_RELEASE"
+  local cilium_version="$CILIUM_CHART_VERSION"
+  local hubble_domain="hubble.${DNS_NAME}"
 
-  log "Waiting for Hubble components to be ready..."
+  log "Templating Cilium Argo Application:"
+  log "  release name:      $cilium_release"
+  log "  release namespace: $cilium_ns"
+  log "  chart version:     $cilium_version"
+  log "  hubble domain:     $hubble_domain"
 
-  kubectl -n "$CILIUM_NS" rollout status deployment/cilium-operator --timeout=5m || true
-  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-relay --timeout=5m || true
-  kubectl -n "$CILIUM_NS" rollout status deployment/hubble-ui --timeout=5m || true
+  cp -f "$CILIUM_APP_SRC" "$CILIUM_APP_RENDERED"
 
-  log "Cilium Hubble enabled. UI should be available at: https://${HUBBLE_HOST}"
+  yq -i "
+    .metadata.name = \"${cilium_release}\" |
+    .spec.destination.namespace = \"${cilium_ns}\" |
+    .spec.source.targetRevision = \"${cilium_version}\" |
+    .spec.source.helm.valuesObject.hubble.ui.ingress.hosts[0] = \"${hubble_domain}\"
+  " "$CILIUM_APP_RENDERED"
+
+
+  # Quick sanity checks
+  [[ "$(yq -r '.metadata.name' "$CILIUM_APP_RENDERED")" == "$cilium_release" ]] \
+    || die "Failed to set .metdata.name in rendered cilium.yaml"
+
+  [[ "$(yq -r '.spec.destination.namespace' "$CILIUM_APP_RENDERED")" == "$cilium_ns" ]] \
+    || die "Failed to set .spec.destination.namespace in rendered cilium.yaml"
+
+  [[ "$(yq -r '.spec.source.targetRevision' "$CILIUM_APP_RENDERED")" == "$cilium_version" ]] \
+    || die "Failed to set .spec.source.targetRevision in rendered cilium.yaml"
+
+  [[ "$(yq -r '.spec.source.helm.valuesObject.hubble.ui.ingress.hosts[0]' "$CILIUM_APP_RENDERED")" == "$hubble_domain" ]] \
+    || die "Failed to set .spec.source.helm.valuesObject.hubble.ui.ingress.hosts[0] in rendered cilium.yaml"
+
+  log "Rendered Argo Application written to: $CILIUM_APP_RENDERED"
+
+  log "Applying rendered Argo Application..."
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" apply -f "$CILIUM_APP_RENDERED"
+  log "Applied Cilium Argo Application."
+}
+
+#######################
+# INGRESS-NGINX
+####################### 
+INGRESS_APP_SRC="${INGRESS_APP_SRC:-${REPO_DIR}/files/argo/adopted/ingress-nginx.yaml}"
+INGRESS_APP_RENDERED="${INGRESS_APP_RENDERED:-${REPO_DIR}/files/argo/adopted/ingress-nginx.rendered.yaml}"
+
+template_and_apply_ingress_nginx_argo_app() {
+  [[ -f "$INGRESS_APP_SRC" ]] || die "Ingress-nginx Argo app file not found: $INGRESS_APP_SRC"
+  have yq || die "yq is required for templating (install_yq in prereqs)"
+
+  # What to template
+  local ingress_nginx_ns="$INGRESS_NS"
+  local ingress_nginx_release="$INGRESS_RELEASE"
+  local ingress_nginx_version="$INGRESS_CHART_VERSION"
+
+  log "Templating Ingress-nginx Argo Application:"
+  log "  release name:      $ingress_nginx_release"
+  log "  release namespace: $ingress_nginx_ns"
+  log "  chart version:     $ingress_nginx_version"
+
+  cp -f "$INGRESS_APP_SRC" "$INGRESS_APP_RENDERED"
+
+  yq -i "
+    .metadata.name = \"${ingress_nginx_release}\" |
+    .spec.destination.namespace = \"${ingress_nginx_ns}\" |
+    .spec.source.targetRevision = \"${ingress_nginx_version}\" 
+  " "$INGRESS_APP_RENDERED"
+
+
+  # Quick sanity checks
+  [[ "$(yq -r '.metadata.name' "$INGRESS_APP_RENDERED")" == "$ingress_nginx_release" ]] \
+    || die "Failed to set .metdata.name in rendered ingress-nginx.yaml"
+
+  [[ "$(yq -r '.spec.destination.namespace' "$INGRESS_APP_RENDERED")" == "$ingress_nginx_ns" ]] \
+    || die "Failed to set .spec.destination.namespace in rendered ingress-nginx.yaml"
+
+  [[ "$(yq -r '.spec.source.targetRevision' "$INGRESS_APP_RENDERED")" == "$ingress_nginx_version" ]] \
+    || die "Failed to set .spec.source.targetRevision in rendered ingress-nginx.yaml"
+
+  log "Rendered Argo Application written to: $INGRESS_APP_RENDERED"
+
+  log "Applying rendered Argo Application..."
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" apply -f "$INGRESS_APP_RENDERED"
+  log "Applied Ingress-nginx Argo Application."
+}
+
+#######################
+# ARGO ITSELF
+####################### 
+ARGOCD_APP_SRC="${ARGOCD_APP_SRC:-${REPO_DIR}/files/argo/adopted/argo.yaml}"
+ARGOCD_APP_RENDERED="${ARGOCD_APP_RENDERED:-${REPO_DIR}/files/argo/adopted/argo.rendered.yaml}"
+
+template_and_apply_argo_argo_app() {
+  [[ -f "$ARGOCD_APP_SRC" ]] || die "ArgoCD Argo app file not found: $ARGOCD_APP_SRC"
+  have yq || die "yq is required for templating (install_yq in prereqs)"
+
+  # What to template
+  local argo_ns="$ARGOCD_NS"
+  local argo_release="$ARGOCD_RELEASE"
+  local argo_version="$ARGOCD_CHART_VERSION"
+  local argocd_domain="argocd.${DNS_NAME}"
+  local argocd_url="https://${argocd_domain}"
+  local argocd_hash
+  argocd_hash="$(argocd_admin_bcrypt "$ARGO_PASSWORD")"
+
+  log "Templating ArgoCD Argo Application:"
+  log "  release name:      $argo_release"
+  log "  release namespace: $argo_ns"
+  log "  chart version:     $argo_version"
+  log "  domain:            $argocd_domain"
+  log "  url:               $argocd_url"
+  log "  admin password:    ${ARGO_PASSWORD:0:4}****"
+  
+  cp -f "$ARGOCD_APP_SRC" "$ARGOCD_APP_RENDERED"
+
+  yq -i "
+    .metadata.name = \"${argo_release}\" |
+    .spec.destination.namespace = \"${argo_ns}\" |
+    .spec.source.targetRevision = \"${argo_version}\" |
+    .spec.source.helm.valuesObject.global.domain = \"${argocd_domain}\" |
+    .spec.source.helm.valuesObject.configs.cm.url = \"${argocd_url}\" |
+    .spec.source.helm.valuesObject.server.ingress.hostname = \"${argocd_domain}\" |
+    .spec.source.helm.valuesObject.server.certificate.domain = \"${argocd_domain}\" |
+    .configs.secret.argocdServerAdminPassword = \"${argocd_hash}\"
+  " "$ARGO_VALUES_RENDERED"
+
+
+  # Quick sanity checks
+  [[ "$(yq -r '.metadata.name' "$ARGOCD_APP_RENDERED")" == "$argo_release" ]] \
+    || die "Failed to set .metdata.name in rendered argo.yaml"
+
+  [[ "$(yq -r '.spec.destination.namespace' "$ARGOCD_APP_RENDERED")" == "$argo_ns" ]] \
+    || die "Failed to set .spec.destination.namespace in rendered argo.yaml"
+
+  [[ "$(yq -r '.spec.source.targetRevision' "$ARGOCD_APP_RENDERED")" == "$argo_version" ]] \
+    || die "Failed to set .spec.source.targetRevision in rendered argo.yaml"
+
+  log "Rendered Argo Application written to: $ARGOCD_APP_RENDERED"
+
+  log "Applying rendered Argo Application..."
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" apply -f "$ARGOCD_APP_RENDERED"
+  log "Applied ArgoCD Argo Application so Argo is self-managed."
+}
+
+argo_adopt_helm_installs() {
+  template_and_apply_cilium_argo_app
+  wait_for_argocd_application_synced_healthy "$CILIUM_RELEASE"
+  template_and_apply_ingress_nginx_argo_app
+  wait_for_argocd_application_synced_healthy "$INGRESS_RELEASE"
+  template_and_apply_argo_argo_app
+  wait_for_argocd_application_synced_healthy "$ARGOCD_RELEASE"
 }
 
 
 print_final_outputs() {
   local argo_addr="argocd.${DNS_NAME}"
   local grafana_addr="grafana.${DNS_NAME}"
+  local prometheus_addr="prometheus.${DNS_NAME}"
+  local hubble_addr="hubble.${DNS_NAME}"
   local tesk_addr="tesk.${DNS_NAME}"
 
   local argo_user="admin"
@@ -1869,8 +1982,6 @@ print_final_outputs() {
   echo "========================================"
   echo "TESK chart version:   ${deployed_chart_version}"
   echo
-  echo "Hubble UI addr:       hubble.${DNS_NAME}"
-  echo 
   echo "Argo DNS addr:        ${argo_addr}"
   echo "Argo admin user:      ${argo_user}"
   echo "Argo admin pw:        ${ARGO_PASSWORD}"
@@ -1878,6 +1989,10 @@ print_final_outputs() {
   echo "Grafana DNS addr:     ${grafana_addr}"
   echo "Grafana admin user:   ${grafana_user}"
   echo "Grafana admin pw:     ${GRAFANA_PASSWORD}"
+  echo 
+  echo "Prometheus DNS addr:  ${prometheus_addr}"
+  echo  
+  echo "Hubble UI addr:       ${hubble_addr}"
   echo
   echo "Tesk DNS addr:        ${tesk_addr}"
   echo
@@ -1888,7 +2003,7 @@ print_final_outputs() {
 
 final_wait_and_print() {
   wait_for_argocd_application_synced_healthy
-  enable_cilium_hubble_grafana_dashboards
+  argo_adopt_helm_installs
   print_final_outputs
 }
 

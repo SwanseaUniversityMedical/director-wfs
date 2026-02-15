@@ -1,0 +1,101 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-nginx
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  destination:
+    namespace: ingress-nginx
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      enabled: true
+      selfHeal: true
+    syncOptions:  
+    - CreateNamespace=true 
+    - ServerSideApply=true
+    - SkipDryRunOnMissingResource=true
+    retry:
+      refresh: true
+      limit: 50
+      backoff: 
+        duration: "60s"
+        factor: 1
+        maxDuration: "30m0s"
+  source:
+    repoURL: "https://kubernetes.github.io/ingress-nginx"
+    chart: ingress-nginx
+    targetRevision: "4.14.3"
+    helm:
+      valuesObject:
+        controller:
+          updateStrategy:
+            type: RollingUpdate
+            rollingUpdate:
+              maxUnavailable: 1
+          hostPort:
+            enabled: true
+          terminationGracePeriodSeconds: 0
+          service:
+            type: NodePort
+          watchIngressWithoutClass: true
+
+          tolerations:
+            - key: "node-role.kubernetes.io/master"
+              operator: "Equal"
+              effect: "NoSchedule"
+            - key: "node-role.kubernetes.io/control-plane"
+              operator: "Equal"
+              effect: "NoSchedule"
+
+          publishService:
+            enabled: false
+          extraArgs:
+            publish-status-address: localhost
+
+          allowSnippetAnnotations: true
+
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: true
+          prometheusRule:
+            enabled: true
+            namespace: monitoring
+            rules: 
+              # These are just examples rules, please adapt them to your needs
+              - alert: NGINXConfigFailed
+                expr: count(nginx_ingress_controller_config_last_reload_successful == 0) > 0
+                for: 1s
+                labels:
+                  severity: critical
+                annotations:
+                  description: bad ingress config - nginx config test failed
+                  summary: uninstall the latest ingress changes to allow config reloads to resume
+              - alert: NGINXCertificateExpiry
+                expr: (avg(nginx_ingress_controller_ssl_expire_time_seconds) by (host) - time()) < 604800
+                for: 1s
+                labels:
+                  severity: critical
+                annotations:
+                  description: ssl certificate(s) will expire in less then a week
+                  summary: renew expiring certificates to avoid downtime
+              - alert: NGINXTooMany500s
+                expr: 100 * ( sum( nginx_ingress_controller_requests{status=~"5.+"} ) / sum(nginx_ingress_controller_requests) ) > 5
+                for: 1m
+                labels:
+                  severity: warning
+                annotations:
+                  description: Too many 5XXs
+                  summary: More than 5% of all requests returned 5XX, this requires your attention
+              - alert: NGINXTooMany400s
+                expr: 100 * ( sum( nginx_ingress_controller_requests{status=~"4.+"} ) / sum(nginx_ingress_controller_requests) ) > 5
+                for: 1m
+                labels:
+                  severity: warning
+                annotations:
+                  description: Too many 4XXs
+                  summary: More than 5% of all requests returned 4XX, this requires your attention
