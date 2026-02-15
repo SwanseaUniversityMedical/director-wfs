@@ -62,18 +62,18 @@ spec:
             ingress:
               enabled: {{ .Values.global.ingress.enabled }}
               ingressClassName: {{ .Values.global.ingress.className }}
-            hosts:
-              - host: falcosidekick.{{ .Values.global.ingress.host }}
-                paths:
-                  - path: /
-            {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
-            annotations:
-              cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
-            tls:
-            - hosts:
-              - falcosidekick.{{ .Values.global.ingress.host }}
-              secretName: falco-sidekick-cert
-            {{- end }}
+              hosts:
+                - host: falcosidekick.{{ .Values.global.ingress.host }}
+                  paths:
+                    - path: /
+              {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
+              annotations:
+                cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
+              tls:
+              - hosts:
+                - falcosidekick.{{ .Values.global.ingress.host }}
+                secretName: falco-sidekick-cert
+              {{- end }}
 
           serviceMonitor:
             enabled: true
