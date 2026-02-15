@@ -79,7 +79,6 @@ spec:
             annotations:
               nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
               nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-              cert-manager.io/cluster-issuer: "ca-issuer"
             hostname: "argocd.localtest.me"
             tls: true
 
