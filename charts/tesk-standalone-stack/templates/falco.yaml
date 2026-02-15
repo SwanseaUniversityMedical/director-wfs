@@ -94,8 +94,12 @@ spec:
           rules-detect-priv-esc.yaml: |
             - rule: Privilege escalation to root
               desc: Detect any attempt to switch to the root user within a container.
-              condition: container and user.uid != 0 and proc.euid = 0 and evt.type = execve
-              output: "Privilege escalation detected (user=%user.name uid=%user.uid container_id=%container.id command=%proc.cmdline)"
+              condition: container and user.uid != 0 and evt.type=execve and proc.name in (sudo, su, doas)
+              output: >
+                Priv esc tool executed (user=%user.name uid=%user.uid loginuid=%user.loginuid
+                container=%container.id image=%container.image
+                k8s_ns=%k8s.ns.name k8s_pod=%k8s.pod.name
+                command=%proc.cmdline parent=%proc.pname)
               priority: CRITICAL
         
 
