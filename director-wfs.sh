@@ -680,6 +680,9 @@ install_helm() {
   helm version >/dev/null 2>&1 || die "helm install failed"
 }
 
+# -----------------------------
+# yq
+# -----------------------------
 install_yq() {
   if have yq; then
     log "yq already installed: $(yq --version || true)"
@@ -746,7 +749,6 @@ install_k9s() {
   have k9s || die "k9s install failed"
 }
 
-
 # -----------------------------
 # Freelens
 # -----------------------------
@@ -791,7 +793,6 @@ install_freelens_linux() {
   sudo install -m 0755 "$tmp" /usr/local/bin/freelens
   rm -f "$tmp"
 }
-
 
 install_freelens_macos() {
   if [[ -d /Applications/Freelens.app ]]; then
@@ -848,7 +849,7 @@ install_freelens() {
 # Composite
 # -----------------------------
 ensure_prereqs() {
-  log "Ensuring prerequisites: docker, kubectl, kind, helm"
+  log "Ensuring prerequisites: docker, kubectl, kind, helm, yq, k9s, freelens"
   ensure_docker
   install_kubectl
   install_kind
@@ -1041,21 +1042,16 @@ helm_release_exists() {
 install_or_upgrade_ingress_nginx() {
   ensure_namespace "$INGRESS_NS"
 
-  local -a extra_args=()
-  if [[ -n "$INGRESS_CHART_VERSION" ]]; then
-    extra_args+=(--version "$INGRESS_CHART_VERSION")
-  fi
-
   if [[ -f "$INGRESS_VALUES_YAML" ]]; then
     log "Installing/upgrading ingress-nginx with values: $INGRESS_VALUES_YAML"
-    helm upgrade --install "$INGRESS_RELEASE" ingress-nginx/ingress-nginx \
+    helm upgrade --install "$INGRESS_RELEASE" ingress-nginx/ingress-nginx --version $INGRESS_CHART_VERSION \
       -n "$INGRESS_NS" \
       -f "$INGRESS_VALUES_YAML" \
       --kube-context kind-${KIND_CLUSTER_NAME} \
       --wait --timeout 10m 
   else
     log "Installing/upgrading ingress-nginx with default values (no values file found at $INGRESS_VALUES_YAML)"
-    helm upgrade --install "$INGRESS_RELEASE" ingress-nginx/ingress-nginx \
+    helm upgrade --install "$INGRESS_RELEASE" ingress-nginx/ingress-nginx -version $INGRESS_CHART_VERSION \
       -n "$INGRESS_NS" \
       --kube-context kind-${KIND_CLUSTER_NAME} \
       --wait --timeout 10m 
@@ -1240,7 +1236,7 @@ install_or_upgrade_argocd() {
   log "  release:   $ARGOCD_RELEASE"
   log "  values:    $ARGOCD_VALUES_FILE"
 
-  helm upgrade --install "$ARGOCD_RELEASE" argo/argo-cd \
+  helm upgrade --install "$ARGOCD_RELEASE" argo/argo-cd --version ${ARGOCD_CHART_VERSION} \
     -n "$ARGOCD_NS" \
     -f "$ARGOCD_VALUES_FILE" \
     --kube-context "kind-${KIND_CLUSTER_NAME}" \
