@@ -49,6 +49,31 @@ spec:
 
         falcosidekick:
           enabled: true
+          replicaCount: 1
+
+          config:
+            talon:
+              address: http://falco-talon:2803
+
+          webui:
+            enabled: true
+            replicaCount: 1
+            
+            ingress:
+              enabled: {{ .Values.global.ingress.enabled }}
+              ingressClassName: {{ .Values.global.ingress.className }}
+            hosts:
+              - host: falcosidekick.{{ .Values.global.ingress.host }}
+                paths:
+                  - path: /
+            {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
+            annotations:
+              cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
+            tls:
+            - hosts:
+              - falcosidekick.{{ .Values.global.ingress.host }}
+              secretName: falco-sidekick-cert
+            {{- end }}
 
           serviceMonitor:
             enabled: true
@@ -64,6 +89,14 @@ spec:
                   namespace: "{{ .Values.prometheus.namespace }}"
                   folder: ""
                   folderAnnotation: grafana_dashboard_folder
+
+        customRules:
+          rules-detect-priv-esc.yaml: |
+            - rule: Privilege escalation to root
+              desc: Detect any attempt to switch to the root user within a container.
+              condition: container and user.uid != 0 and user.euid = 0
+              output: "Privilege escalation detected (user=%user.name container=%container.id command=%proc.cmdline)"
+              priority: CRITICAL
         
 
 {{- end }}

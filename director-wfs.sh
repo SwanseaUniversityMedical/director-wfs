@@ -1035,6 +1035,11 @@ helm_release_exists() {
   helm -n "$ns" status "$rel" >/dev/null 2>&1
 }
 
+argo_app_exists() {
+  local ns="$1" app="$2"
+  kubectl get app "$2" -n "$ns" >/dev/null 2>&1
+}
+
 # -----------------------------
 # Ingress-NGINX install/upgrade
 # - If ${INGRESS_VALUES_YAML} exists, use it as values file
@@ -1116,6 +1121,15 @@ apply_coredns_patch() {
 # Composite step
 # -----------------------------
 install_networking_and_patch_dns() {
+  local argo_ns="${ARGOCD_NS:-argocd}"
+
+  if argo_app_exists "$argo_ns" cilium \
+     && argo_app_exists "$argo_ns" ingress-nginx; then
+
+    log "All networking Argo apps already exist (cilium, ingress-nginx). Skipping Helm installs."
+    return 0
+  fi
+
   ensure_helm_repos
   install_or_upgrade_cilium
   install_or_upgrade_ingress_nginx
@@ -1259,7 +1273,11 @@ install_or_upgrade_argocd() {
   log "Argo CD installed/upgraded."
 }
 
-install_or_upgrade_argocd
+if ! (argo_app_exists "$ARGOCD_NS" $ARGOCD_RELEASE); then
+  install_or_upgrade_argocd
+else
+  log "ArgoCD self-managed app already exists. Skipping Helm install."
+fi
 
 
 # NAMESPACES + GENERATED SECRETS
