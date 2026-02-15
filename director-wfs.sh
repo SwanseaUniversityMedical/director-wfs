@@ -1156,13 +1156,12 @@ ensure_htpasswd() {
 
 argocd_admin_bcrypt() {
   # Outputs bcrypt hash compatible with Argo CD
-  # Uses: htpasswd -nbBC 10 "" password | tr -d ':\n' | sed 's/$2y/$2a/'
+  # Uses: htpasswd -nbBC 10 "" password | tr -d ':\n' 
   local password="$1"
   ensure_htpasswd >/dev/null 2>&1
 
   htpasswd -nbBC 10 "" "$password" \
-    | tr -d ':\n' \
-    | sed 's/\$2y/\$2a/'
+    | tr -d ':\n' 
 }
 
 template_argo_values() {
@@ -1906,6 +1905,8 @@ template_and_apply_argo_argo_app() {
   local argocd_hash
   argocd_hash="$(argocd_admin_bcrypt "$ARGO_PASSWORD")"
 
+  # gotta do this mtime thing to 1 day ago 
+
   log "Templating ArgoCD Argo Application:"
   log "  release name:      $argo_release"
   log "  release namespace: $argo_ns"
@@ -1924,7 +1925,7 @@ template_and_apply_argo_argo_app() {
     .spec.source.helm.valuesObject.configs.cm.url = \"${argocd_url}\" |
     .spec.source.helm.valuesObject.server.ingress.hostname = \"${argocd_domain}\" |
     .spec.source.helm.valuesObject.server.certificate.domain = \"${argocd_domain}\" |
-    .configs.secret.argocdServerAdminPassword = \"${argocd_hash}\"
+    .spec.source.helm.valuesObject.configs.secret.argocdServerAdminPassword = \"${argocd_hash}\"
   " "$ARGO_VALUES_RENDERED"
 
 
