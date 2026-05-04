@@ -39,7 +39,8 @@ tesk:
 
   service:
     type: ClusterIP
-
+    type: NodePort
+      nodePort: 31080  
 
 networkPolicy:
   enabled: false
