@@ -12,7 +12,7 @@ If you're running this on an arm64 Apple machine, make sure your Docker Desktop 
 
 You can one-shot run the script with 
 
-`bash <(curl -s https://raw.githubusercontent.com/SwanseaUniversityMedical/director-wfs/feat/extra-install/director-wfs.sh)`
+`bash <(curl -s https://raw.githubusercontent.com/SwanseaUniversityMedical/director-wfs/refs/heads/main/director-wfs.sh)`
 
 which will show you the required and optional script args.
 
