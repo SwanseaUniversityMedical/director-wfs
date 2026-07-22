@@ -199,7 +199,7 @@ spec:
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]
-    excludedNamespaces: ["kube-system", "local-path-storage", "monitoring"]
+    excludedNamespaces: ["kube-system", "local-path-storage", "monitoring", "falco", "cert-manager"]
   parameters:
     allowedHostPaths:
       - pathPrefix: "/var/local-path-provisioner/"

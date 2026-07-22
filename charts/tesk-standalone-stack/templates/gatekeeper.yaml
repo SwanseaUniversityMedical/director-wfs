@@ -41,6 +41,7 @@ spec:
     targetRevision: {{ .Values.gatekeeper.chartVersion }}
     helm:
       valuesObject:
+        replicas: 1
         auditMatchKindOnly: true
 
         auditInterval: 240

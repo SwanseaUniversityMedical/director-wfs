@@ -11,3 +11,17 @@ stringData:
   type: helm
   url: harbor.federated-analytics.ac.uk/tesk/chart
 
+---
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-helm-oci-cilium
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  enableOCI: "true"
+  name: "cilium"
+  type: helm
+  url: quay.io/cilium/charts

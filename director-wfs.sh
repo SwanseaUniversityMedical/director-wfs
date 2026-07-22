@@ -14,7 +14,7 @@ warn() { log "WARN: $*"; }
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  ./director-wfs.sh <dns_name> [dev_password] [s3_endpoint] [s3_access_key] [s3_secret_key] [s3_use_tls] [signing_cert_fullchain_or_path] [signing_key_or_path]
+  ./director-wfs.sh <dns_name> [dev_password] [s3_endpoint] [s3_access_key] [s3_secret_key] [s3_use_tls] [signing_cert_fullchain_or_path] [signing_key_or_path] [extra_egress_endpoints] [tesk_stack_chart_version]
 
 Args:
   1. dns_name                         (required)
@@ -25,6 +25,8 @@ Args:
   6. s3_use_tls                       (optional; true/false/1/0/yes/no)
   7. signing cert full chain OR path  (optional; .crt/.pem, chain: intermediate then root)
   8. signing cert key OR path         (optional; .key)
+  9. extra egress IPs / hostnames     (optional; comma-separated list)
+  10. tesk stack chart version        (optional; for dev/test purposes)
 
 Env fallbacks (if args missing):
   AWS_ACCESS_KEY_ID
@@ -47,6 +49,8 @@ S3_SECRET_KEY="${5:-}"
 S3_USE_TLS_RAW="${6:-}"
 SIGNING_CHAIN_IN="${7:-}"
 SIGNING_KEY_IN="${8:-}"
+EXTRA_EGRESS_RAW="${9:-}"
+TESK_STACK_CHART_VERSION="${10:-}"
 
 [[ -n "$DNS_NAME" ]] || { usage; die "dns_name (arg1) is required"; }
 
@@ -448,7 +452,6 @@ log "  GRAFANA_PASSWORD: ${GRAFANA_PASSWORD:0:4}****"
 export DOCKER_DEFAULT_PLATFORM=
 set DOCKER_DEFAULT_PLATFORM=
 
-
 if [[ "$OS_FAMILY" != "macos" ]]; then
   # if we don't set this we get open file exhaustion
   sudo sysctl -w fs.inotify.max_user_watches=10485760
@@ -476,6 +479,9 @@ need_internet_hint() {
 }
 
 ensure_curl_linux() {
+  # if we don't set this we get open file exhaustion
+  sudo sysctl -w fs.inotify.max_user_watches=10485760
+
   if ! have curl; then
     log "Installing curl..."
     sudo apt-get update -y
@@ -680,6 +686,9 @@ install_helm() {
   helm version >/dev/null 2>&1 || die "helm install failed"
 }
 
+# -----------------------------
+# yq
+# -----------------------------
 install_yq() {
   if have yq; then
     log "yq already installed: $(yq --version || true)"
@@ -746,7 +755,6 @@ install_k9s() {
   have k9s || die "k9s install failed"
 }
 
-
 # -----------------------------
 # Freelens
 # -----------------------------
@@ -792,6 +800,43 @@ install_freelens_linux() {
   rm -f "$tmp"
 }
 
+install_freelens_macos() {
+  if [[ -d /Applications/Freelens.app ]]; then
+    log "Freelens already installed"
+    return 0
+  fi
+
+  # Prefer Homebrew if available
+  if have brew; then
+    log "Installing Freelens via Homebrew cask..."
+    brew install --cask freelens || die "Failed to install Freelens via brew"
+    return 0
+  fi
+
+  # Fallback: download DMG directly
+  need_internet_hint
+
+  local arch url tmp
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) die "Unsupported arch for Freelens on macOS: $(uname -m)" ;;
+  esac
+
+  # FREELENS_VERSION should be numeric, e.g. 1.8.0
+  # FREELENS_TAG should be v1.8.0
+  url="https://github.com/freelensapp/freelens/releases/download/${FREELENS_TAG}/Freelens-${FREELENS_VERSION}-macos-${arch}.dmg"
+  tmp="$(mktemp -t freelens.XXXXXX.dmg)"
+
+  log "Downloading Freelens DMG (${FREELENS_TAG})..."
+  curl -fsSL "$url" -o "$tmp"
+
+  warn "Downloaded Freelens DMG to: $tmp"
+  warn "Please open it and drag Freelens.app into /Applications:"
+  warn "  open \"$tmp\""
+}
+
 install_freelens() {
   case "$OS_FAMILY" in
     ubuntu|debian|linux)
@@ -810,7 +855,7 @@ install_freelens() {
 # Composite
 # -----------------------------
 ensure_prereqs() {
-  log "Ensuring prerequisites: docker, kubectl, kind, helm"
+  log "Ensuring prerequisites: docker, kubectl, kind, helm, yq, k9s, freelens"
   ensure_docker
   install_kubectl
   install_kind
@@ -965,7 +1010,7 @@ CILIUM_RELEASE="${CILIUM_RELEASE:-cilium}"
 
 # Cilium chart version optional pin
 CILIUM_CHART_VERSION="${CILIUM_CHART_VERSION:-1.19.0}"   # e.g. "1.15.6"
-INGRESS_CHART_VERSION="${INGRESS_CHART_VERSION:-}" # e.g. "4.11.3"
+INGRESS_CHART_VERSION="${INGRESS_CHART_VERSION:-4.14.3}" # e.g. "4.11.3"
 
 # Repo YAML locations (from cloned repo root)
 DEPS_DIR="${DEPS_DIR:-${REPO_DIR}/files/deps}"
@@ -996,6 +1041,11 @@ helm_release_exists() {
   helm -n "$ns" status "$rel" >/dev/null 2>&1
 }
 
+argo_app_exists() {
+  local ns="$1" app="$2"
+  kubectl get app "$2" -n "$ns" >/dev/null 2>&1
+}
+
 # -----------------------------
 # Ingress-NGINX install/upgrade
 # - If ${INGRESS_VALUES_YAML} exists, use it as values file
@@ -1003,21 +1053,16 @@ helm_release_exists() {
 install_or_upgrade_ingress_nginx() {
   ensure_namespace "$INGRESS_NS"
 
-  local -a extra_args=()
-  if [[ -n "$INGRESS_CHART_VERSION" ]]; then
-    extra_args+=(--version "$INGRESS_CHART_VERSION")
-  fi
-
   if [[ -f "$INGRESS_VALUES_YAML" ]]; then
     log "Installing/upgrading ingress-nginx with values: $INGRESS_VALUES_YAML"
-    helm upgrade --install "$INGRESS_RELEASE" ingress-nginx/ingress-nginx \
+    helm upgrade --install "$INGRESS_RELEASE" ingress-nginx/ingress-nginx --version $INGRESS_CHART_VERSION \
       -n "$INGRESS_NS" \
       -f "$INGRESS_VALUES_YAML" \
       --kube-context kind-${KIND_CLUSTER_NAME} \
       --wait --timeout 10m 
   else
     log "Installing/upgrading ingress-nginx with default values (no values file found at $INGRESS_VALUES_YAML)"
-    helm upgrade --install "$INGRESS_RELEASE" ingress-nginx/ingress-nginx \
+    helm upgrade --install "$INGRESS_RELEASE" ingress-nginx/ingress-nginx -version $INGRESS_CHART_VERSION \
       -n "$INGRESS_NS" \
       --kube-context kind-${KIND_CLUSTER_NAME} \
       --wait --timeout 10m 
@@ -1077,10 +1122,20 @@ apply_coredns_patch() {
     warn "CoreDNS rollout status check failed; continuing."
 }
 
+
 # -----------------------------
 # Composite step
 # -----------------------------
 install_networking_and_patch_dns() {
+  local argo_ns="${ARGOCD_NS:-argocd}"
+
+  if argo_app_exists "$argo_ns" cilium \
+     && argo_app_exists "$argo_ns" ingress-nginx; then
+
+    log "All networking Argo apps already exist (cilium, ingress-nginx). Skipping Helm installs."
+    return 0
+  fi
+
   ensure_helm_repos
   install_or_upgrade_cilium
   install_or_upgrade_ingress_nginx
@@ -1121,13 +1176,12 @@ ensure_htpasswd() {
 
 argocd_admin_bcrypt() {
   # Outputs bcrypt hash compatible with Argo CD
-  # Uses: htpasswd -nbBC 10 "" password | tr -d ':\n' | sed 's/$2y/$2a/'
+  # Uses: htpasswd -nbBC 10 "" password | tr -d ':\n' 
   local password="$1"
   ensure_htpasswd >/dev/null 2>&1
 
   htpasswd -nbBC 10 "" "$password" \
-    | tr -d ':\n' \
-    | sed 's/\$2y/\$2a/'
+    | tr -d ':\n' 
 }
 
 template_argo_values() {
@@ -1178,7 +1232,7 @@ ARGOCD_NS="${ARGOCD_NS:-argocd}"
 ARGOCD_RELEASE="${ARGOCD_RELEASE:-argocd}"
 
 # Pin chart version optionally
-ARGOCD_CHART_VERSION="${ARGOCD_CHART_VERSION:-}"   # e.g. "7.6.12"
+ARGOCD_CHART_VERSION="${ARGOCD_CHART_VERSION:-9.4.2}"   # e.g. "7.6.12"
 
 # Rendered values file from previous step
 ARGOCD_VALUES_FILE="${ARGOCD_VALUES_FILE:-$ARGO_VALUES_RENDERED}"
@@ -1201,7 +1255,7 @@ install_or_upgrade_argocd() {
   log "  release:   $ARGOCD_RELEASE"
   log "  values:    $ARGOCD_VALUES_FILE"
 
-  helm upgrade --install "$ARGOCD_RELEASE" argo/argo-cd \
+  helm upgrade --install "$ARGOCD_RELEASE" argo/argo-cd --version ${ARGOCD_CHART_VERSION} \
     -n "$ARGOCD_NS" \
     -f "$ARGOCD_VALUES_FILE" \
     --kube-context "kind-${KIND_CLUSTER_NAME}" \
@@ -1225,7 +1279,11 @@ install_or_upgrade_argocd() {
   log "Argo CD installed/upgraded."
 }
 
-install_or_upgrade_argocd
+if ! (argo_app_exists "$ARGOCD_NS" $ARGOCD_RELEASE); then
+  install_or_upgrade_argocd
+else
+  log "ArgoCD self-managed app already exists. Skipping Helm install."
+fi
 
 
 # NAMESPACES + GENERATED SECRETS
@@ -1484,15 +1542,64 @@ PY
   return 1
 }
 
-derive_s3_egress_ip() {
+build_yaml_list_file() {
+  local src="$1"
+  local tmp
+  tmp="$(mktemp -t list.XXXXXX.yaml)"
+
+  if [[ ! -s "$src" ]]; then
+    echo "[]" >"$tmp"
+  else
+    sed '/^[[:space:]]*$/d' "$src" | sed 's/^/- /' >"$tmp"
+  fi
+
+  echo "$tmp"
+}
+
+parse_extra_egress_targets() {
+  local raw="$1"
+  local ips=()
+  local addrs=()
+
+  [[ -z "$raw" ]] && return 0
+
+  IFS=',' read -ra items <<<"$raw"
+
+  local item ip host
+  for item in "${items[@]}"; do
+    item="$(echo "$item" | xargs)"
+    [[ -z "$item" ]] && continue
+
+    host="$(extract_host "$item")"
+
+    if is_ipv4 "$host"; then
+      ips+=("$host")
+    else
+      # validate DNS resolves
+      ip="$(resolve_ipv4 "$host" || true)"
+      [[ -n "$ip" ]] || die "Could not resolve extra egress host '$host'"
+      addrs+=("$host")
+    fi
+  done
+
+  printf '%s\n' "${ips[@]}" > /tmp/extra-egress-ips.$$
+  printf '%s\n' "${addrs[@]}" > /tmp/extra-egress-addrs.$$
+
+  echo "/tmp/extra-egress-ips.$$ /tmp/extra-egress-addrs.$$"
+}
+
+derive_minio_endpoint_and_type() {
   [[ -n "${S3_ENDPOINT:-}" ]] || die "S3_ENDPOINT not set"
-  local host ip
+
+  local host
   host="$(extract_host "$S3_ENDPOINT")"
   [[ -n "$host" ]] || die "Could not extract host from S3_ENDPOINT='$S3_ENDPOINT'"
 
-  ip="$(resolve_ipv4 "$host" || true)"
-  [[ -n "$ip" ]] || die "Could not resolve IPv4 for S3 endpoint host '$host' (from '$S3_ENDPOINT')"
-  echo "$ip"
+  if is_ipv4 "$host"; then
+    echo "$host true"
+  else
+    echo "$host false"
+  fi
 }
 
 get_kube_server_git_version() {
@@ -1518,6 +1625,32 @@ print(sv.get("gitVersion",""))' 2>/dev/null || true)"
   echo "$ver"
 }
 
+get_kind_control_plane_container_name() {
+  # kind names containers like: <clustername>-control-plane
+  echo "${KIND_CLUSTER_NAME}-control-plane"
+}
+
+get_docker_container_ip() {
+  local container="$1"
+  have docker || return 1
+  docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container" 2>/dev/null || return 1
+}
+
+get_kubeconfig_server_host() {
+  # Extract cluster.server from the current context (or explicitly your kind context)
+  # Example: https://127.0.0.1:6443
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" config view --raw --minify \
+    -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true
+}
+
+extract_host_from_url() {
+  local url="$1"
+  url="${url#http://}"
+  url="${url#https://}"
+  url="${url%%/*}"   # drop path
+  url="${url%%:*}"   # drop port
+  echo "$url"
+}
 
 # ---- Template + apply ----
 template_and_apply_argo_app() {
@@ -1525,39 +1658,83 @@ template_and_apply_argo_app() {
   have yq || die "yq is required for templating (install_yq in prereqs)"
 
   # What to template
-  local ingress_host="$DNS_NAME" 
-  local minio_ip
-  minio_ip="$(derive_s3_egress_ip)"
-  local kube_version
+  local tesk_version="$TESK_STACK_CHART_VERSION"
+  local ingress_host="$DNS_NAME"
+  local kube_version 
   kube_version="$(get_kube_server_git_version)"
+
+  read -r minio_endpoint minio_is_ip <<<"$(derive_minio_endpoint_and_type)"
+
+  local extra_files extra_ips_file extra_addrs_file
+  extra_files="$(parse_extra_egress_targets "$EXTRA_EGRESS_RAW")"
+  read -r extra_ips_file extra_addrs_file <<<"$extra_files"
+
+  local extra_ips_yaml extra_addrs_yaml
+  extra_ips_yaml="$(build_yaml_list_file "$extra_ips_file")"
+  extra_addrs_yaml="$(build_yaml_list_file "$extra_addrs_file")"
 
   [[ -n "${GRAFANA_PASSWORD:-}" ]] || die "GRAFANA_PASSWORD not set"
 
   log "Templating Argo Application:"
   log "  ingress host: $ingress_host"
-  log "  s3 egress IP: $minio_ip"
+  log "  minio endpoint: $minio_endpoint (is_ip=$minio_is_ip)"
   log "  grafana password: ${GRAFANA_PASSWORD:0:4}****"
   log "  kubernetes version: $kube_version"
+  if [[ -s "$extra_ips_yaml" ]]; then
+    log "  extra egress IPs:"
+    sed 's/^/    /' "$extra_ips_yaml" >&2
+  fi
+
+  if [[ -s "$extra_addrs_yaml" ]]; then
+    log "  extra egress addrs:"
+    sed 's/^/    /' "$extra_addrs_yaml" >&2
+  fi
 
   cp -f "$ARGO_APP_SRC" "$ARGO_APP_RENDERED"
 
-  # Patch the specific fields inside valuesObject
-  yq -i "
-    .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
-    .spec.source.helm.valuesObject.networkPolicy.egressMinioIP = \"${minio_ip}\" |
-    .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
-    .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\"
-  " "$ARGO_APP_RENDERED"
+  if [[ -n "$tesk_version" ]]; then
+    log "  overriding TESK chart version: $tesk_version"
+    yq -i "
+      .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpoint = \"${minio_endpoint}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpointIsIP = ${minio_is_ip} |
+      .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
+      .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
+      .spec.source.targetRevision = \"${tesk_version}\" |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_ips_yaml}\") |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressAddrs = load(\"${extra_addrs_yaml}\") 
+    " "$ARGO_APP_RENDERED"
+  else
+    yq -i "
+      .spec.source.helm.valuesObject.global.ingress.host = \"${ingress_host}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpoint = \"${minio_endpoint}\" |
+      .spec.source.helm.valuesObject.networkPolicy.egressMinioEndpointIsIP = ${minio_is_ip} |
+      .spec.source.helm.valuesObject.prometheus.grafana.adminPassword = \"${GRAFANA_PASSWORD}\" |
+      .spec.source.helm.valuesObject.global.kubeVersion = \"${kube_version}\" |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressIPs = load(\"${extra_ips_yaml}\") |
+      .spec.source.helm.valuesObject.networkPolicy.extraEgressAddrs = load(\"${extra_addrs_yaml}\") 
+    " "$ARGO_APP_RENDERED"
+  fi
+
+  rm -f "$extra_ips_file" "$extra_addrs_file"
 
   # Quick sanity checks
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.ingress.host' "$ARGO_APP_RENDERED")" == "$ingress_host" ]] \
     || die "Failed to set ingress.host in rendered app.yaml"
 
-  [[ "$(yq -r '.spec.source.helm.valuesObject.networkPolicy.egressMinioIP' "$ARGO_APP_RENDERED")" == "$minio_ip" ]] \
-    || die "Failed to set networkPolicy.egressMinioIP in rendered app.yaml"
+  [[ "$(yq -r '.spec.source.helm.valuesObject.networkPolicy.egressMinioEndpoint' "$ARGO_APP_RENDERED")" == "$minio_endpoint" ]] \
+    || die "Failed to set networkPolicy.egressMinioEndpoint in rendered app.yaml"
 
   [[ "$(yq -r '.spec.source.helm.valuesObject.global.kubeVersion' "$ARGO_APP_RENDERED")" == "$kube_version" ]] \
     || die "Failed to set global.kubeVersion in rendered app.yaml"
+
+  yq -e '.spec.source.helm.valuesObject.networkPolicy.extraEgressIPs | type == "!!seq"' \
+  "$ARGO_APP_RENDERED" >/dev/null || die "extraEgressIPs not rendered as list"
+
+  if [[ -n "$tesk_version" ]]; then
+  [[ "$(yq -r '.spec.source.targetRevision' "$ARGO_APP_RENDERED")" == "$tesk_version" ]] \
+    || die "Failed to set spec.source.targetRevision in rendered app.yaml"
+  fi
 
   log "Rendered Argo Application written to: $ARGO_APP_RENDERED"
 
@@ -1575,61 +1752,257 @@ WAIT_APP_TIMEOUT_SECS="${WAIT_APP_TIMEOUT_SECS:-1800}"  # 30 minutes
 
 # Helpers to read status
 get_app_sync_status() {
+  local app_name="${1:-${ARGO_APP_NAME:-}}"
   kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" \
-    get application "$ARGO_APP_NAME" -o jsonpath='{.status.sync.status}' 2>/dev/null || true
+    get application "$app_name" -o jsonpath='{.status.sync.status}' 2>/dev/null || true
 }
+
 get_app_health_status() {
+  local app_name="${1:-${ARGO_APP_NAME:-}}"
   kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" \
-    get application "$ARGO_APP_NAME" -o jsonpath='{.status.health.status}' 2>/dev/null || true
+    get application "$app_name" -o jsonpath='{.status.health.status}' 2>/dev/null || true
 }
 
 wait_for_argocd_application_synced_healthy() {
-  log "Waiting up to ${WAIT_APP_TIMEOUT_SECS}s for Argo Application '${ARGO_APP_NAME}' to be Synced + Healthy..."
+  local app_name="${1:-${ARGO_APP_NAME:-}}"
+
+  [[ -n "$app_name" ]] || die "wait_for_argocd_application_synced_healthy: no app name provided and ARGO_APP_NAME not set"
+
+  log "Waiting up to ${WAIT_APP_TIMEOUT_SECS}s for Argo Application '${app_name}' to be Synced + Healthy..."
 
   local deadline=$(( $(date +%s) + WAIT_APP_TIMEOUT_SECS ))
   local sync health
 
   while (( $(date +%s) < deadline )); do
-    sync="$(get_app_sync_status)"
-    health="$(get_app_health_status)"
+    sync="$(get_app_sync_status "$app_name")"
+    health="$(get_app_health_status "$app_name")"
 
     if [[ "$sync" == "Synced" && "$health" == "Healthy" ]]; then
-      log "Application is Synced + Healthy."
+      log "Application '${app_name}' is Synced + Healthy."
       return 0
     fi
 
-    log "Application status: sync='${sync:-?}' health='${health:-?}' (waiting...)"
+    log "Application '${app_name}' status: sync='${sync:-?}' health='${health:-?}' (waiting...)"
     sleep 10
   done
 
-  warn "Timed out waiting for Synced + Healthy."
+  warn "Timed out waiting for Synced + Healthy for Application '${app_name}'."
 
   # Diagnostics
   warn "Current Application YAML summary:"
-  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get application "$ARGO_APP_NAME" -o yaml || true
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get application "$app_name" -o yaml || true
 
   warn "Argo Application conditions:"
-  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get application "$ARGO_APP_NAME" \
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get application "$app_name" \
     -o jsonpath='{range .status.conditions[*]}{.type}{" - "}{.message}{"\n"}{end}' || true
 
   warn "Recent events in argocd namespace:"
   kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" get events --sort-by=.lastTimestamp | tail -n 50 || true
 
-  die "Argo Application did not become Synced + Healthy within ${WAIT_APP_TIMEOUT_SECS}s"
+  die "Argo Application '${app_name}' did not become Synced + Healthy within ${WAIT_APP_TIMEOUT_SECS}s"
 }
+
+get_deployed_tesk_chart_version() {
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" -n "$ARGOCD_NS" \
+    get application "$ARGO_APP_NAME" \
+    -o jsonpath='{.status.sync.revision}' 2>/dev/null || true
+}
+
+# -----------------------------------
+# ADOPT HELM-INSTALLED DEPS WITH ARGO
+# ----------------------------------- 
+
+#######################
+# CILIUM
+####################### 
+CILIUM_APP_SRC="${CILIUM_APP_SRC:-${REPO_DIR}/files/argo/adopted/cilium.yaml}"
+CILIUM_APP_RENDERED="${CILIUM_APP_RENDERED:-${REPO_DIR}/files/argo/adopted/cilium.rendered.yaml}"
+
+template_and_apply_cilium_argo_app() {
+  [[ -f "$CILIUM_APP_SRC" ]] || die "Cilium Argo app file not found: $CILIUM_APP_SRC"
+  have yq || die "yq is required for templating (install_yq in prereqs)"
+
+  # What to template
+  local cilium_ns="$CILIUM_NS"
+  local cilium_release="$CILIUM_RELEASE"
+  local cilium_version="$CILIUM_CHART_VERSION"
+  local hubble_domain="hubble.${DNS_NAME}"
+
+  log "Templating Cilium Argo Application:"
+  log "  release name:      $cilium_release"
+  log "  release namespace: $cilium_ns"
+  log "  chart version:     $cilium_version"
+  log "  hubble domain:     $hubble_domain"
+
+  cp -f "$CILIUM_APP_SRC" "$CILIUM_APP_RENDERED"
+
+  yq -i "
+    .metadata.name = \"${cilium_release}\" |
+    .spec.destination.namespace = \"${cilium_ns}\" |
+    .spec.source.targetRevision = \"${cilium_version}\" |
+    .spec.source.helm.valuesObject.hubble.ui.ingress.hosts[0] = \"${hubble_domain}\"
+  " "$CILIUM_APP_RENDERED"
+
+
+  # Quick sanity checks
+  [[ "$(yq -r '.metadata.name' "$CILIUM_APP_RENDERED")" == "$cilium_release" ]] \
+    || die "Failed to set .metdata.name in rendered cilium.yaml"
+
+  [[ "$(yq -r '.spec.destination.namespace' "$CILIUM_APP_RENDERED")" == "$cilium_ns" ]] \
+    || die "Failed to set .spec.destination.namespace in rendered cilium.yaml"
+
+  [[ "$(yq -r '.spec.source.targetRevision' "$CILIUM_APP_RENDERED")" == "$cilium_version" ]] \
+    || die "Failed to set .spec.source.targetRevision in rendered cilium.yaml"
+
+  [[ "$(yq -r '.spec.source.helm.valuesObject.hubble.ui.ingress.hosts[0]' "$CILIUM_APP_RENDERED")" == "$hubble_domain" ]] \
+    || die "Failed to set .spec.source.helm.valuesObject.hubble.ui.ingress.hosts[0] in rendered cilium.yaml"
+
+  log "Rendered Argo Application written to: $CILIUM_APP_RENDERED"
+
+  log "Applying rendered Argo Application..."
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" apply -f "$CILIUM_APP_RENDERED"
+  log "Applied Cilium Argo Application."
+}
+
+#######################
+# INGRESS-NGINX
+####################### 
+INGRESS_APP_SRC="${INGRESS_APP_SRC:-${REPO_DIR}/files/argo/adopted/ingress-nginx.yaml}"
+INGRESS_APP_RENDERED="${INGRESS_APP_RENDERED:-${REPO_DIR}/files/argo/adopted/ingress-nginx.rendered.yaml}"
+
+template_and_apply_ingress_nginx_argo_app() {
+  [[ -f "$INGRESS_APP_SRC" ]] || die "Ingress-nginx Argo app file not found: $INGRESS_APP_SRC"
+  have yq || die "yq is required for templating (install_yq in prereqs)"
+
+  # What to template
+  local ingress_nginx_ns="$INGRESS_NS"
+  local ingress_nginx_release="$INGRESS_RELEASE"
+  local ingress_nginx_version="$INGRESS_CHART_VERSION"
+
+  log "Templating Ingress-nginx Argo Application:"
+  log "  release name:      $ingress_nginx_release"
+  log "  release namespace: $ingress_nginx_ns"
+  log "  chart version:     $ingress_nginx_version"
+
+  cp -f "$INGRESS_APP_SRC" "$INGRESS_APP_RENDERED"
+
+  yq -i "
+    .metadata.name = \"${ingress_nginx_release}\" |
+    .spec.destination.namespace = \"${ingress_nginx_ns}\" |
+    .spec.source.targetRevision = \"${ingress_nginx_version}\" 
+  " "$INGRESS_APP_RENDERED"
+
+
+  # Quick sanity checks
+  [[ "$(yq -r '.metadata.name' "$INGRESS_APP_RENDERED")" == "$ingress_nginx_release" ]] \
+    || die "Failed to set .metdata.name in rendered ingress-nginx.yaml"
+
+  [[ "$(yq -r '.spec.destination.namespace' "$INGRESS_APP_RENDERED")" == "$ingress_nginx_ns" ]] \
+    || die "Failed to set .spec.destination.namespace in rendered ingress-nginx.yaml"
+
+  [[ "$(yq -r '.spec.source.targetRevision' "$INGRESS_APP_RENDERED")" == "$ingress_nginx_version" ]] \
+    || die "Failed to set .spec.source.targetRevision in rendered ingress-nginx.yaml"
+
+  log "Rendered Argo Application written to: $INGRESS_APP_RENDERED"
+
+  log "Applying rendered Argo Application..."
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" apply -f "$INGRESS_APP_RENDERED"
+  log "Applied Ingress-nginx Argo Application."
+}
+
+#######################
+# ARGO ITSELF
+####################### 
+ARGOCD_APP_SRC="${ARGOCD_APP_SRC:-${REPO_DIR}/files/argo/adopted/argo.yaml}"
+ARGOCD_APP_RENDERED="${ARGOCD_APP_RENDERED:-${REPO_DIR}/files/argo/adopted/argo.rendered.yaml}"
+
+template_and_apply_argo_argo_app() {
+  [[ -f "$ARGOCD_APP_SRC" ]] || die "ArgoCD Argo app file not found: $ARGOCD_APP_SRC"
+  have yq || die "yq is required for templating (install_yq in prereqs)"
+
+  # What to template
+  local argo_ns="$ARGOCD_NS"
+  local argo_release="$ARGOCD_RELEASE"
+  local argo_version="$ARGOCD_CHART_VERSION"
+  local argocd_domain="argocd.${DNS_NAME}"
+  local argocd_url="https://${argocd_domain}"
+  local argocd_hash
+  argocd_hash="$(argocd_admin_bcrypt "$ARGO_PASSWORD")"
+
+  # gotta do this mtime thing to 1 day ago 
+
+  log "Templating ArgoCD Argo Application:"
+  log "  release name:      $argo_release"
+  log "  release namespace: $argo_ns"
+  log "  chart version:     $argo_version"
+  log "  domain:            $argocd_domain"
+  log "  url:               $argocd_url"
+  log "  admin password:    ${ARGO_PASSWORD:0:4}****"
+  
+  cp -f "$ARGOCD_APP_SRC" "$ARGOCD_APP_RENDERED"
+
+  yq -i "
+    .metadata.name = \"${argo_release}\" |
+    .spec.destination.namespace = \"${argo_ns}\" |
+    .spec.source.targetRevision = \"${argo_version}\" |
+    .spec.source.helm.valuesObject.global.domain = \"${argocd_domain}\" |
+    .spec.source.helm.valuesObject.configs.cm.url = \"${argocd_url}\" |
+    .spec.source.helm.valuesObject.server.ingress.hostname = \"${argocd_domain}\" |
+    .spec.source.helm.valuesObject.server.certificate.domain = \"${argocd_domain}\" |
+    .spec.source.helm.valuesObject.configs.secret.argocdServerAdminPassword = \"${argocd_hash}\"
+  " "$ARGO_VALUES_RENDERED"
+
+
+  # Quick sanity checks
+  [[ "$(yq -r '.metadata.name' "$ARGOCD_APP_RENDERED")" == "$argo_release" ]] \
+    || die "Failed to set .metdata.name in rendered argo.yaml"
+
+  [[ "$(yq -r '.spec.destination.namespace' "$ARGOCD_APP_RENDERED")" == "$argo_ns" ]] \
+    || die "Failed to set .spec.destination.namespace in rendered argo.yaml"
+
+  [[ "$(yq -r '.spec.source.targetRevision' "$ARGOCD_APP_RENDERED")" == "$argo_version" ]] \
+    || die "Failed to set .spec.source.targetRevision in rendered argo.yaml"
+
+  log "Rendered Argo Application written to: $ARGOCD_APP_RENDERED"
+
+  log "Applying rendered Argo Application..."
+  kubectl --context "kind-${KIND_CLUSTER_NAME}" apply -f "$ARGOCD_APP_RENDERED"
+  log "Applied ArgoCD Argo Application so Argo is self-managed."
+}
+
+argo_adopt_helm_installs() {
+  template_and_apply_cilium_argo_app
+  wait_for_argocd_application_synced_healthy "$CILIUM_RELEASE"
+  template_and_apply_ingress_nginx_argo_app
+  wait_for_argocd_application_synced_healthy "$INGRESS_RELEASE"
+  template_and_apply_argo_argo_app
+  wait_for_argocd_application_synced_healthy "$ARGOCD_RELEASE"
+}
+
 
 print_final_outputs() {
   local argo_addr="argocd.${DNS_NAME}"
   local grafana_addr="grafana.${DNS_NAME}"
+  local prometheus_addr="prometheus.${DNS_NAME}"
+  local hubble_addr="hubble.${DNS_NAME}"
   local tesk_addr="tesk.${DNS_NAME}"
 
   local argo_user="admin"
   local grafana_user="admin"
 
+  local deployed_chart_version
+  deployed_chart_version="$(get_deployed_tesk_chart_version)"
+
+  if [[ -z "$deployed_chart_version" ]]; then
+    deployed_chart_version="(unknown)"
+  fi
+
   echo
   echo "========================================"
   echo "TESK stack deployed successfully"
   echo "========================================"
+  echo "TESK chart version:   ${deployed_chart_version}"
+  echo
   echo "Argo DNS addr:        ${argo_addr}"
   echo "Argo admin user:      ${argo_user}"
   echo "Argo admin pw:        ${ARGO_PASSWORD}"
@@ -1637,6 +2010,10 @@ print_final_outputs() {
   echo "Grafana DNS addr:     ${grafana_addr}"
   echo "Grafana admin user:   ${grafana_user}"
   echo "Grafana admin pw:     ${GRAFANA_PASSWORD}"
+  echo 
+  echo "Prometheus DNS addr:  ${prometheus_addr}"
+  echo  
+  echo "Hubble UI addr:       ${hubble_addr}"
   echo
   echo "Tesk DNS addr:        ${tesk_addr}"
   echo
@@ -1647,6 +2024,7 @@ print_final_outputs() {
 
 final_wait_and_print() {
   wait_for_argocd_application_synced_healthy
+  argo_adopt_helm_installs
   print_final_outputs
 }
 

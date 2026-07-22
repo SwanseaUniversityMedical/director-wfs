@@ -1,7 +1,3 @@
-# helm template argocd argo/argo-cd --namespace hiru-mgmt-argocd --values upgrade-values.yaml
-apiVersionOverrides:
-  certmanager: "cert-manager.io/v1"
-
 global:
   domain: "argocd.localtest.me"
 

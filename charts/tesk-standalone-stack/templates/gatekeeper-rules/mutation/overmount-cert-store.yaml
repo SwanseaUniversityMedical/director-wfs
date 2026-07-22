@@ -1,0 +1,30 @@
+# {{- if and (and .Values.gatekeeper.enabled .Values.global.selfSignedRootCA) .Values.trustManager.enabled }}
+# apiVersion: mutations.gatekeeper.sh/v1alpha1
+# kind: Assign
+# metadata:
+#   name: k8sovermountcertstore
+#   labels:
+#     {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+#   annotations:
+#     argocd.argoproj.io/sync-wave: "7"
+# spec:
+#   applyTo:
+#   - groups: [""]
+#     kinds: ["Pod"]
+#     versions: ["v1"]
+#   match:
+#     scope: Namespaced
+#     kinds:
+#     - apiGroups: [""]
+#       kinds: ["Pod"]
+#     namespaces:
+#     - "{{ .Values.global.namespace }}"
+#   location: "spec.containers[name:*].securityContext.allowPrivilegeEscalation"
+#   parameters:
+#     pathTests:
+#     - subPath: "spec.containers[name:*].securityContext.allowPrivilegeEscalation"
+#       condition: MustNotExist
+#     assign:
+#       value: false
+
+# {{- end }}
