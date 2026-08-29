@@ -24,28 +24,17 @@ warn() { log "WARN: $*"; }
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  ./director-wfs-custom-app.sh <dns_name> [dev_password] [s3_endpoint] [s3_access_key] [s3_secret_key] [s3_use_tls] [signing_cert_fullchain_or_path] [signing_key_or_path]
+  ./director-wfs-custom-app.sh <dns_name> [dev_password] [signing_cert_fullchain_or_path] [signing_key_or_path]
 
   ArgoCD Application parameters (CUSTOM_APP_*) are set via env vars - see
   the "CUSTOMIZE YOUR ARGOCD APP HERE" block further down in this script.
+  Add any parameters your own app needs (positional args or env vars) there.
 
 Args:
   1. dns_name                         (required)
   2. dev password                     (optional)
-  3. s3_endpoint                      (optional; include protocol+port ideally)
-  4. s3_access_key                    (optional)
-  5. s3_secret_key                    (optional)
-  6. s3_use_tls                       (optional; true/false/1/0/yes/no)
-  7. signing cert full chain OR path  (optional; .crt/.pem, chain: intermediate then root)
-  8. signing cert key OR path         (optional; .key)
-
-Env fallbacks (if args missing):
-  AWS_ACCESS_KEY_ID
-  AWS_SECRET_ACCESS_KEY
-  AWS_ENDPOINT
-
-AWS credentials fallback file:
-  ~/.aws/credentials  (expects keys: aws_access_key_id, aws_secret_access_key; and optionally endpoint)
+  3. signing cert full chain OR path  (optional; .crt/.pem, chain: intermediate then root)
+  4. signing cert key OR path         (optional; .key)
 EOF
 }
 
@@ -54,12 +43,8 @@ EOF
 # -----------------------------
 DNS_NAME="${1:-}"
 DEV_PASSWORD_IN="${2:-}"
-S3_ENDPOINT_RAW="${3:-}"
-S3_ACCESS_KEY="${4:-}"
-S3_SECRET_KEY="${5:-}"
-S3_USE_TLS_RAW="${6:-}"
-SIGNING_CHAIN_IN="${7:-}"
-SIGNING_KEY_IN="${8:-}"
+SIGNING_CHAIN_IN="${3:-}"
+SIGNING_KEY_IN="${4:-}"
 
 [[ -n "$DNS_NAME" ]] || { usage; die "dns_name (arg1) is required"; }
 
@@ -90,165 +75,6 @@ detect_os() {
 
 OS_FAMILY="$(detect_os)"
 log "Detected OS family: ${OS_FAMILY}"
-
-# -----------------------------
-# Helpers: truthy parsing
-# -----------------------------
-to_bool() {
-  # echoes "true" or "false" or empty if unknown
-  local v="${1:-}"
-  v="$(echo "$v" | tr '[:upper:]' '[:lower:]' | xargs || true)"
-  case "$v" in
-    1|true|yes|y|on)  echo "true" ;;
-    0|false|no|n|off) echo "false" ;;
-    "") echo "" ;;
-    *) echo "" ;;
-  esac
-}
-
-# -----------------------------
-# AWS creds parsing from ~/.aws/credentials
-# - simple INI parsing for [default]
-# - also tries to find "endpoint" if present
-# -----------------------------
-parse_aws_credentials_file() {
-  local file="$1"
-  [[ -f "$file" ]] || return 1
-
-  # Extract from [default] section (or first occurrence if no section)
-  # This is intentionally simple; good enough for typical credentials files.
-  local in_default=0
-  local ak="" sk="" ep=""
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    # strip comments
-    line="${line%%#*}"
-    line="${line%%;*}"
-    line="$(echo "$line" | xargs || true)"
-    [[ -n "$line" ]] || continue
-
-    if [[ "$line" =~ ^\[.*\]$ ]]; then
-      if [[ "$line" == "[default]" ]]; then
-        in_default=1
-      else
-        in_default=0
-      fi
-      continue
-    fi
-
-    # If file has sections, only parse default. If no sections, in_default stays 0 and we still parse.
-    if grep -q '^\[' "$file"; then
-      [[ "$in_default" -eq 1 ]] || continue
-    fi
-
-    case "$line" in
-      aws_access_key_id=*|aws_access_key_id\ =*)
-        ak="${line#*=}"; ak="$(echo "$ak" | xargs || true)"
-        ;;
-      aws_secret_access_key=*|aws_secret_access_key\ =*)
-        sk="${line#*=}"; sk="$(echo "$sk" | xargs || true)"
-        ;;
-      endpoint=*|endpoint\ =*)
-        ep="${line#*=}"; ep="$(echo "$ep" | xargs || true)"
-        ;;
-    esac
-  done < "$file"
-
-  [[ -n "$ak" ]] && echo "AWS_ACCESS_KEY_ID=$ak"
-  [[ -n "$sk" ]] && echo "AWS_SECRET_ACCESS_KEY=$sk"
-  [[ -n "$ep" ]] && echo "AWS_ENDPOINT=$ep"
-  return 0
-}
-
-# -----------------------------
-# Endpoint normalization
-# - ensure scheme; if missing, try probe (curl) else heuristics based on port
-# - return normalized endpoint and inferred tls bool if not explicitly provided
-# -----------------------------
-has_scheme() {
-  [[ "${1:-}" =~ ^https?:// ]]
-}
-
-extract_port() {
-  # best-effort: grabs last ":<digits>" in host:port (ignores scheme)
-  local s="${1:-}"
-  s="${s#http://}"
-  s="${s#https://}"
-  if [[ "$s" =~ :([0-9]{2,5})($|/) ]]; then
-    echo "${BASH_REMATCH[1]}"
-  else
-    echo ""
-  fi
-}
-
-probe_scheme_with_curl() {
-  local hostport="$1" # no scheme
-  command -v curl >/dev/null 2>&1 || return 1
-
-  # Try https first quickly; if it responds at all, assume https.
-  if curl -k -sS --max-time 2 -I "https://${hostport}" >/dev/null 2>&1; then
-    echo "https"
-    return 0
-  fi
-  if curl -sS --max-time 2 -I "http://${hostport}" >/dev/null 2>&1; then
-    echo "http"
-    return 0
-  fi
-  return 1
-}
-
-infer_scheme_heuristic() {
-  local hostport="$1"
-  local port
-  port="$(extract_port "$hostport")"
-  case "$port" in
-    443|8443|9443) echo "https" ;;
-    80|8080|9000|9001) echo "http" ;;
-    "") echo "https" ;; # conservative default if unknown
-    *)  echo "https" ;; # conservative default
-  esac
-}
-
-normalize_endpoint_and_tls() {
-  local endpoint_raw="$1"
-  local tls_raw="$2" # may be empty
-  local tls_val=""
-  tls_val="$(to_bool "$tls_raw" || true)"
-
-  if [[ -z "$endpoint_raw" ]]; then
-    echo "ENDPOINT="
-    echo "TLS="
-    return 0
-  fi
-
-  local endpoint="$endpoint_raw"
-  if has_scheme "$endpoint"; then
-    # Infer TLS from scheme if tls not provided
-    if [[ -z "$tls_val" ]]; then
-      if [[ "$endpoint" =~ ^https:// ]]; then tls_val="true"; else tls_val="false"; fi
-    fi
-    echo "ENDPOINT=$endpoint"
-    echo "TLS=$tls_val"
-    return 0
-  fi
-
-  # No scheme: infer it
-  local scheme=""
-  if scheme="$(probe_scheme_with_curl "$endpoint" 2>/dev/null)"; then
-    :
-  else
-    scheme="$(infer_scheme_heuristic "$endpoint")"
-  fi
-
-  endpoint="${scheme}://${endpoint}"
-
-  if [[ -z "$tls_val" ]]; then
-    [[ "$scheme" == "https" ]] && tls_val="true" || tls_val="false"
-  fi
-
-  echo "ENDPOINT=$endpoint"
-  echo "TLS=$tls_val"
-}
 
 # -----------------------------
 # Random secrets helper
@@ -327,55 +153,6 @@ EOF
 }
 
 # -----------------------------
-# Resolve inputs
-# -----------------------------
-AWS_CREDS_FILE="${HOME}/.aws/credentials"
-
-# 1) Pull missing S3 config from ~/.aws/credentials if needed
-if [[ -z "${S3_ACCESS_KEY}" || -z "${S3_SECRET_KEY}" || -z "${S3_ENDPOINT_RAW}" ]]; then
-  if [[ -f "$AWS_CREDS_FILE" ]]; then
-    log "Attempting to read missing S3 config from ${AWS_CREDS_FILE}"
-    while IFS= read -r kv; do
-      case "$kv" in
-        AWS_ACCESS_KEY_ID=*)
-          [[ -n "$S3_ACCESS_KEY" ]] || S3_ACCESS_KEY="${kv#*=}"
-          ;;
-        AWS_SECRET_ACCESS_KEY=*)
-          [[ -n "$S3_SECRET_KEY" ]] || S3_SECRET_KEY="${kv#*=}"
-          ;;
-        AWS_ENDPOINT=*)
-          [[ -n "$S3_ENDPOINT_RAW" ]] || S3_ENDPOINT_RAW="${kv#*=}"
-          ;;
-      esac
-    done < <(parse_aws_credentials_file "$AWS_CREDS_FILE" || true)
-  fi
-fi
-
-# 2) Pull missing S3 config from env vars if needed
-if [[ -z "${S3_ACCESS_KEY}" && -n "${AWS_ACCESS_KEY_ID:-}" ]]; then
-  S3_ACCESS_KEY="$AWS_ACCESS_KEY_ID"
-fi
-if [[ -z "${S3_SECRET_KEY}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
-  S3_SECRET_KEY="$AWS_SECRET_ACCESS_KEY"
-fi
-if [[ -z "${S3_ENDPOINT_RAW}" && -n "${AWS_ENDPOINT:-}" ]]; then
-  S3_ENDPOINT_RAW="$AWS_ENDPOINT"
-fi
-
-# 3) Normalize endpoint + TLS
-normalized="$(normalize_endpoint_and_tls "$S3_ENDPOINT_RAW" "$S3_USE_TLS_RAW")"
-# shellcheck disable=SC2206
-eval "$normalized"  # sets ENDPOINT and TLS
-S3_ENDPOINT="$ENDPOINT"
-S3_USE_TLS="$TLS"
-
-# Validate S3 required fields (if any still empty the script fails fail)
-[[ -n "$S3_ENDPOINT" ]]   || die "S3 endpoint is required (arg2 or ~/.aws/credentials or AWS_ENDPOINT)"
-[[ -n "$S3_ACCESS_KEY" ]] || die "S3 access key is required (arg3 or ~/.aws/credentials or AWS_ACCESS_KEY_ID)"
-[[ -n "$S3_SECRET_KEY" ]] || die "S3 secret key is required (arg4 or ~/.aws/credentials or AWS_SECRET_ACCESS_KEY)"
-[[ -n "$S3_USE_TLS" ]]    || die "S3 use tls could not be determined (arg5 or from endpoint scheme)"
-
-# -----------------------------
 # Signing cert chain/key resolution
 # -----------------------------
 CERT_DIR=""
@@ -411,8 +188,8 @@ if [[ -n "$SIGNING_CHAIN_IN" && -n "$SIGNING_KEY_IN" ]]; then
   chain_file="$(resolve_path_or_inline_pem "$SIGNING_CHAIN_IN" "${CERT_DIR}/provided-fullchain.pem")"
   key_file="$(resolve_path_or_inline_pem "$SIGNING_KEY_IN" "${CERT_DIR}/provided-key.pem")"
 
-  [[ -n "$chain_file" ]] || die "arg6 provided but not a readable file and not inline PEM"
-  [[ -n "$key_file"   ]] || die "arg7 provided but not a readable file and not inline PEM"
+  [[ -n "$chain_file" ]] || die "arg3 provided but not a readable file and not inline PEM"
+  [[ -n "$key_file"   ]] || die "arg4 provided but not a readable file and not inline PEM"
 
   SIGNING_CHAIN="$chain_file"
   SIGNING_KEY="$key_file"
@@ -446,10 +223,6 @@ fi
 # -----------------------------
 log "Resolved configuration:"
 log "  DNS_NAME:         $DNS_NAME"
-log "  S3_ENDPOINT:      $S3_ENDPOINT"
-log "  S3_USE_TLS:       $S3_USE_TLS"
-log "  S3_ACCESS_KEY:    ${S3_ACCESS_KEY:0:4}****"
-log "  S3_SECRET_KEY:    (hidden)"
 log "  SIGNING_CHAIN:    $SIGNING_CHAIN"
 log "  SIGNING_KEY:      $SIGNING_KEY"
 log "  CERT_DIR:         ${CERT_DIR:-"(none)"}"
@@ -1470,10 +1243,12 @@ wait_and_apply_argo_bootstrap
 # Edit the block between the CUSTOM_APP_VALUES_YAML markers below to match
 # whatever your chart expects (this replaces TESK's global.ingress.host /
 # networkPolicy.egressMinioIP / prometheus.grafana.adminPassword fields).
-# You have DNS_NAME, ARGO_PASSWORD/GRAFANA_PASSWORD, S3_ENDPOINT/
-# S3_ACCESS_KEY/S3_SECRET_KEY/S3_USE_TLS, and SIGNING_CHAIN/SIGNING_KEY
-# already resolved above if your chart needs any of them - just reference
-# the shell variables inside the heredoc.
+# You have DNS_NAME, ARGO_PASSWORD/GRAFANA_PASSWORD, and SIGNING_CHAIN/
+# SIGNING_KEY already resolved above if your chart needs any of them - just
+# reference the shell variables inside the heredoc. If your app needs
+# additional parameters (e.g. its own object storage credentials), add
+# them as new CUSTOM_APP_* env vars in the block above and reference them
+# here too.
 # =====================================================================
 build_custom_app_values_yaml() {
   cat <<CUSTOM_APP_VALUES_YAML
@@ -1481,12 +1256,6 @@ build_custom_app_values_yaml() {
 ingress:
   enabled: true
   host: "${DNS_NAME}"
-# example of reusing S3 config resolved earlier in the script:
-# s3:
-#   endpoint: "${S3_ENDPOINT}"
-#   accessKey: "${S3_ACCESS_KEY}"
-#   secretKey: "${S3_SECRET_KEY}"
-#   useTls: ${S3_USE_TLS}
 # --- END: replace with your chart's values ---
 CUSTOM_APP_VALUES_YAML
 }
