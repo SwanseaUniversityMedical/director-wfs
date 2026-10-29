@@ -1,0 +1,139 @@
+{{- if .Values.falco.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: falco-talon
+  namespace: {{ .Values.global.namespace }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    {{- include "tesk-standalone-stack.labels" . | nindent 4 }}
+spec:
+  project: {{ .Values.global.argoProject }}
+  destination:
+    namespace: {{ .Values.falco.namespace }}
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+    retry:
+      refresh: true
+  source:
+    repoURL: {{ .Values.falco.repoURL }}
+    chart: {{ .Values.falco.talon.chart }}
+    targetRevision: {{ .Values.falco.talon.chartVersion }}
+    helm:
+      valuesObject:
+        replicaCount: 1
+
+        ingress:
+          enabled: {{ .Values.global.ingress.enabled }}
+          hosts:
+            - host: falco-talon.{{ .Values.global.ingress.host }}
+              paths:
+                - path: /
+          annotations:
+            kubernetes.io/ingress.class: nginx
+          {{- if and (not .Values.global.dev) (not .Values.global.localDev) }}
+            cert-manager.io/cluster-issuer: "{{ .Values.global.ingress.certClusterIssuer }}"
+          tls:
+          - hosts:
+            - falco-talon.{{ .Values.global.ingress.host }}
+            secretName: falco-talon-cert
+          {{- end }}
+
+        serviceMonitor:
+          enabled: true
+
+        grafana:
+          dashboards:
+            enabled: true
+            configMaps:
+              talon:
+                namespace: "{{ .Values.prometheus.namespace }}"
+
+        config:
+          rulesOverride: |
+            - action: Terminate Pod
+              actionner: kubernetes:terminate
+              parameters:
+                ignore_daemonsets: true
+                ignore_statefulsets: true
+                grace_period_seconds: 20
+
+            - rule: Terminal shell in container
+              description: >
+                Label the pod outside kube-system and falco namespaces if a shell is started inside
+              match:
+                rules:
+                  - Terminal shell in container
+                output_fields:
+                  - k8s.ns.name!=kube-system, k8s.ns.name!=falco, k8s.ns.name!=monitoring, k8s.ns.name!=local-path-storage
+              actions:
+                - action: Label Pod as Suspicious
+
+            - rule: Privilege escalation to root
+              description: >
+                Terminate a pod if it tries to elevate permissions to root
+              match:
+                rules:
+                  - Privilege escalation to root
+                output_fields:
+                  - k8s.ns.name!=kube-system, k8s.ns.name!=falco, k8s.ns.name!=monitoring, k8s.ns.name!=local-path-storage
+              actions:
+                - action: Terminate Pod
+
+            - rule: Container tried to change user
+              description: >
+                Terminate a pod if it tries to change the user it's running as
+              match:
+                rules:
+                  - Non sudo setuid
+                output_fields:
+                  - k8s.ns.name!=kube-system, k8s.ns.name!=falco, k8s.ns.name!=monitoring, k8s.ns.name!=local-path-storage
+              actions:
+                - action: Terminate Pod
+
+            - rule: Launch remote file copy tools in container
+              description: >
+                Label a pod outside specific namespaces if remote file copy tools are launched in it
+              match:
+                rules:
+                  - Launch remote file copy tools in container
+                output_fields:
+                  - k8s.ns.name!=kube-system, k8s.ns.name!=falco, k8s.ns.name!=monitoring, k8s.ns.name!=local-path-storage
+              actions:
+                - action: Label Pod as Suspicious
+
+            - rule: Potential Local Privilege Escalation via Environment Variables Misuse
+              description: >
+                Terminate a pod if it's trying to escalate privileges via environment variables
+              match:
+                rules:
+                  - Potential Local Privilege Escalation via Environment Variables Misuse
+                output_fields:
+                  - k8s.ns.name!=kube-system, k8s.ns.name!=falco, k8s.ns.name!=monitoring, k8s.ns.name!=local-path-storage
+              actions:
+                - action: Terminate Pod
+
+            - rule: Kubernetes client tool launched in container
+              description: >
+                Label a pod as suspicious if it's trying to use the kubectl cli tool.
+              match:
+                rules:
+                  - Kubernetes client tool launched in container
+                output_fields:
+                  - k8s.ns.name!=kube-system, k8s.ns.name!=falco, k8s.ns.name!=monitoring, k8s.ns.name!=local-path-storage
+              actions:
+                - action: Label Pod as Suspicious
+
+
+{{- end }}

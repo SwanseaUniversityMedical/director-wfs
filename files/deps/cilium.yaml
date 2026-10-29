@@ -8,13 +8,22 @@ image:
   pullPolicy: IfNotPresent 
 
 hubble:
-  enabled: false
+  enabled: true
   relay:
-    enabled: false
+    enabled: true
   ui:
-    enabled: false
+    enabled: true
   peerService:
     servicePort: 8443
+  redact:
+    enabled: true
+    http:
+      urlQuery: true
+      userInfo: true
+      headers:
+        deny:
+          - Authorization
+          - Proxy-Authorization
 
 
 kubeProxyReplacement: true
