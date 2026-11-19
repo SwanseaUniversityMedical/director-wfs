@@ -792,6 +792,45 @@ install_freelens_linux() {
   rm -f "$tmp"
 }
 
+install_freelens_macos() {
+  if [ -d "/Applications/FreeLens.app" ]; then
+    log "FreeLens is already installed"
+    return 0
+  fi
+
+  need_internet_hint
+
+  local arch
+  arch=$(uname -m)
+  local pkg_url
+
+  url="https://api.github.com/repos/freelensapp/freelens/releases/latest"
+  pkg_arch=$([ "$arch" = "arm64" ] && echo arm64 || echo amd64)
+
+  pkg_url=$(
+    curl -s "$url" |
+    grep browser_download_url |
+    grep "macos-${pkg_arch}\.pkg\"" |
+    cut -d '"' -f 4
+  )
+
+  if [ -z "$pkg_url" ]; then
+    log "Failed to determine FreeLens download URL"
+    return 1
+  fi
+  
+  local pkg_file="/tmp/freelens.pkg"
+    
+  log "Downloading FreeLens..."
+  curl -L --progress-bar "$pkg_url" -o "$pkg_file" || return 1
+        
+  log  "Installing FreeLens..."
+  sudo installer -pkg "$pkg_file" -target / || return 1
+
+  rm -f "$pkg_file"
+
+  log "FreeLens installed successfully"
+}
 install_freelens() {
   case "$OS_FAMILY" in
     ubuntu|debian|linux)
