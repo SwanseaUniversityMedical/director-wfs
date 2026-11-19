@@ -12,13 +12,13 @@ If you're running this on an arm64 Apple machine, make sure your Docker Desktop 
 
 You can one-shot run the script with 
 
-`bash <(curl -s https://raw.githubusercontent.com/SwanseaUniversityMedical/director-wfs/feat/extra-install/director-wfs.sh)`
+`bash <(curl -s https://raw.githubusercontent.com/SwanseaUniversityMedical/director-wfs/refs/heads/main/director-wfs.sh)`
 
 which will show you the required and optional script args.
 
 For an easy test/play example that isn't linked to a real S3, meaning TESK jobs will fail, but still gives you a fully functioning cluster with everything installed/deployed, you can use the command 
 
-`bash <(curl -s https://raw.githubusercontent.com/SwanseaUniversityMedical/director-wfs/feat/extra-install/director-wfs.sh) localtest.me admin1 https://rustfs.localtest.me rustfsadmin rustfsadmin`
+`bash <(curl -s https://raw.githubusercontent.com/SwanseaUniversityMedical/director-wfs/refs/heads/main/director-wfs.sh) localtest.me admin1 https://rustfs.localtest.me rustfsadmin rustfsadmin`
 
 This will set all ingresses to be sub-addresses of `localtest.me` (which resolves to localhost so you can access argo etc from the machine you're running the script on), and the argocd and grafana admin user passwords will both be set to `admin1`.
 The s3 config args are only used to pass through the configuration to TESK so it doesn't matter that they don't point at anything and that we don't actually have a S3 service running at `https://rustfs.localtest.me`.
